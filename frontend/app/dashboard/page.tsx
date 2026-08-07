@@ -37,16 +37,27 @@ export default function DashboardPage() {
   const fetchData = useCallback(async () => {
     try {
       const api = authApi();
-      const [docsRes, convsRes, meRes] = await Promise.all([
-        api.get("/api/v1/documents/"),
-        api.get("/api/v1/chat/conversations"),
-        api.get("/api/v1/auth/me"),
-      ]);
-      setDocuments(docsRes.data.documents);
-      setConversations(convsRes.data.conversations);
+      const meRes = await api.get("/api/v1/auth/me");
       setUserEmail(meRes.data.email);
-    } catch {
-      Cookies.remove("access_token");
+
+      try {
+        const docsRes = await api.get("/api/v1/documents/");
+        setDocuments(docsRes.data.documents || []);
+      } catch (docErr) {
+        console.error("Failed to fetch documents:", docErr);
+        setDocuments([]);
+      }
+
+      try {
+        const convsRes = await api.get("/api/v1/chat/conversations");
+        setConversations(convsRes.data.conversations || []);
+      } catch (convErr) {
+        console.error("Failed to fetch conversations:", convErr);
+        setConversations([]);
+      }
+    } catch (authErr) {
+      console.error("Authentication check failed:", authErr);
+      Cookies.remove("access_token", { path: "/" });
       router.push("/login");
     } finally {
       setLoading(false);
@@ -108,7 +119,7 @@ export default function DashboardPage() {
   };
 
   const handleLogout = () => {
-    Cookies.remove("access_token");
+    Cookies.remove("access_token", { path: "/" });
     router.push("/login");
   };
 

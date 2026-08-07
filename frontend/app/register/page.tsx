@@ -27,7 +27,7 @@ export default function RegisterPage() {
       loginForm.append("username", form.email);
       loginForm.append("password", form.password);
       const loginRes = await api.post("/api/v1/auth/login", loginForm);
-      Cookies.set("access_token", loginRes.data.access_token, { expires: 1 });
+      Cookies.set("access_token", loginRes.data.access_token, { path: "/", expires: 1 });
       toast.success("Welcome aboard! 🎉");
       router.push("/dashboard");
     } catch (err: unknown) {

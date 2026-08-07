@@ -78,7 +78,7 @@ export default function LandingPage() {
 
             <p className="text-xl text-slate-400 mb-10 max-w-2xl mx-auto leading-relaxed">
               Upload PDFs, Word files, and notes. Get precise answers with citations
-              from an agentic RAG system that actually knows what it's talking about.
+              from an agentic RAG system that actually knows what it&apos;s talking about.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">

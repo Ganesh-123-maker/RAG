@@ -20,7 +20,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post("/api/v1/auth/login", { email, password });
-      Cookies.set("access_token", res.data.access_token, { expires: 1 });
+      Cookies.set("access_token", res.data.access_token, { path: "/", expires: 1 });
       toast.success("Welcome back!");
       router.push("/dashboard");
     } catch (err: unknown) {
