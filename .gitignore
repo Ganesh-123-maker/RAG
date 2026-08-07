@@ -1,0 +1,49 @@
+.env
+.env.local
+.env.production
+.env.staging
+
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+*.sqlite
+*.sqlite3
+ragdb.sqlite
+
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+postgres_data/
+qdrant_data/
+uploads/
+backend/uploads/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Temp / editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Alembic cache
+alembic/__pycache__/

@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  backend-tests:
+    name: Backend Tests (Python 3.11)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: pip install -r requirements.txt
+
+      - name: Run tests with coverage
+        working-directory: ./backend
+        env:
+          # Placeholder — unit tests mock all OpenAI calls
+          OPENAI_API_KEY: "sk-test-placeholder-not-used-in-unit-tests"
+          # Use SQLite in-memory for CI — no PostgreSQL service required
+          DATABASE_URL: "sqlite+aiosqlite:///./test_ragdb.sqlite"
+          # Use Qdrant in-memory mode — no Qdrant service required
+          QDRANT_HOST: ":memory:"
+          # Secret must be ≥32 chars for JWT to work
+          JWT_SECRET_KEY: "ci-test-secret-key-minimum-32-chars-long"
+          ENVIRONMENT: "test"
+        run: |
+          python -m pytest tests/ -v \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --tb=short
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: backend/coverage.xml
+          retention-days: 7
+
+      - name: Upload coverage to Codecov (optional)
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./backend/coverage.xml
+        continue-on-error: true
+
+  frontend-check:
+    name: Frontend Type Check & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: TypeScript type check
+        working-directory: ./frontend
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        working-directory: ./frontend
+        run: npm run lint
