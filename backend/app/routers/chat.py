@@ -180,7 +180,6 @@ async def chat_stream(
         document_id=payload.document_id,
     )
 
-    # Build citations list from retrieved chunks — will be saved with the message after streaming
     stream_citations = [
         {
             "document_id": c.document_id,
@@ -222,7 +221,6 @@ async def chat_stream(
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
             return
 
-        # Persist assistant message with citations so conversation reload shows sources
         citations_json = json.dumps(stream_citations)
         async with AsyncSessionLocal() as session:
             repo = ConversationRepository(session)
