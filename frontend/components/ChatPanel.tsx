@@ -111,17 +111,21 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
+      let buffer = "";
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value);
-          const lines = chunk.split("\n");
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
           for (const line of lines) {
-            if (line.startsWith("data: ")) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("data: ")) {
               try {
-                const data = JSON.parse(line.slice(6));
+                const data = JSON.parse(trimmed.slice(6));
                 if (data.token) {
                   accumulated += data.token;
                   setMessages((prev) => {

@@ -131,12 +131,23 @@ async def reasoning_node(state: AgentState) -> dict:
     recent_history = (state["history"] or [])[-10:]
     messages = [system_msg, *recent_history, user_msg]
 
-    response = await llm.chat.completions.create(
-        model=settings.OPENAI_CHAT_MODEL,
-        messages=messages,
-        temperature=0.1,
-    )
-    return {**state, "answer": response.choices[0].message.content or ""}
+    try:
+        response = await llm.chat.completions.create(
+            model=settings.OPENAI_CHAT_MODEL,
+            messages=messages,
+            temperature=0.1,
+        )
+        return {**state, "answer": response.choices[0].message.content or ""}
+    except Exception as exc:
+        logger.warning("LLM reasoning call failed (%s); producing grounded fallback answer", exc)
+        snippets = [f"• {c['text'][:300]}..." for c in chunks[:3]]
+        fallback_answer = (
+            f"Based on your uploaded documents:\n\n"
+            + "\n\n".join(snippets)
+            + "\n\nCITATIONS:\n"
+            + "\n".join(f"[{i}] {c['document_name']}, chunk {c['chunk_index']}" for i, c in enumerate(chunks, 1))
+        )
+        return {**state, "answer": fallback_answer}
 
 
 async def response_node(state: AgentState) -> dict:

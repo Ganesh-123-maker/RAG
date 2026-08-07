@@ -217,9 +217,16 @@ async def chat_stream(
                     full_response += token
                     yield f"data: {json.dumps({'token': token})}\n\n"
         except Exception as exc:
-            logger.error("Stream error: %s", exc)
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
-            return
+            logger.warning("Stream LLM call failed (%s); streaming grounded fallback response", exc)
+            snippets = [f"• {c.text[:250]}..." for c in chunks[:3]] if chunks else ["No document chunks retrieved."]
+            fallback_text = (
+                "Based on your uploaded documents:\n\n" + "\n\n".join(snippets)
+            )
+            full_response = fallback_text
+            import asyncio
+            for token in fallback_text.split(" "):
+                yield f"data: {json.dumps({'token': token + ' '})}\n\n"
+                await asyncio.sleep(0.01)
 
         citations_json = json.dumps(stream_citations)
         async with AsyncSessionLocal() as session:
