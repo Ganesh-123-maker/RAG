@@ -29,10 +29,15 @@ def get_qdrant_client() -> AsyncQdrantClient:
         if settings.QDRANT_HOST in (":memory:", "memory", ":memory") or settings.QDRANT_HOST.startswith("./"):
             _qdrant_client = AsyncQdrantClient(location=":memory:")
         else:
-            _qdrant_client = AsyncQdrantClient(
-                host=settings.QDRANT_HOST,
-                port=settings.QDRANT_PORT,
-            )
+            # Use HTTPS + API key for Qdrant Cloud; plain HTTP for local instances
+            kwargs: dict = {
+                "host": settings.QDRANT_HOST,
+                "port": settings.QDRANT_PORT,
+            }
+            if settings.QDRANT_API_KEY:
+                kwargs["api_key"] = settings.QDRANT_API_KEY
+                kwargs["https"] = True
+            _qdrant_client = AsyncQdrantClient(**kwargs)
     return _qdrant_client
 
 

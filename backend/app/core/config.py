@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     QDRANT_COLLECTION: str = "rag_chunks"
+    QDRANT_API_KEY: str | None = None
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
