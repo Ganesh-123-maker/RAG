@@ -25,7 +25,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
 
 
-@router.post("/", response_model=MessageResponse, status_code=201)
+@router.post("", response_model=MessageResponse, status_code=201)
+@router.post("/", response_model=MessageResponse, status_code=201, include_in_schema=False)
 async def chat(
     payload: ChatRequest,
     current_user: CurrentUser,
@@ -68,6 +69,7 @@ async def chat(
         content=result.answer,
         citations_json=citations_json,
     )
+    await db.commit()
 
     return MessageResponse(
         id=assistant_msg.id,
@@ -108,8 +110,9 @@ async def get_conversation(
     if conv is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
+    msgs = await conv_repo.get_messages(conversation_id)
     messages = []
-    for msg in conv.messages:
+    for msg in msgs:
         raw_citations = json.loads(msg.citations_json) if msg.citations_json else []
         messages.append(
             MessageResponse(
@@ -234,6 +237,6 @@ async def chat_stream(
             await repo.add_message(conv_id, "assistant", full_response, citations_json=citations_json)
             await session.commit()
 
-        yield f"data: {json.dumps({'done': True, 'conversation_id': str(conv_id)})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'conversation_id': str(conv_id), 'citations': stream_citations})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

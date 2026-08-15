@@ -118,6 +118,22 @@ export default function DashboardPage() {
     }
   };
 
+  const deleteConversation = async (e: React.MouseEvent, convId: string) => {
+    e.stopPropagation();
+    if (!confirm("Delete this conversation?")) return;
+    try {
+      const api = authApi();
+      await api.delete(`/api/v1/chat/conversations/${convId}`);
+      toast.success("Conversation deleted");
+      setConversations((prev) => prev.filter((c) => c.id !== convId));
+      if (activeConvId === convId) {
+        setActiveConvId(null);
+      }
+    } catch {
+      toast.error("Failed to delete conversation");
+    }
+  };
+
   const handleLogout = () => {
     Cookies.remove("access_token", { path: "/" });
     router.push("/login");
@@ -200,18 +216,27 @@ export default function DashboardPage() {
                 Recent chats
               </p>
               {conversations.slice(0, 15).map((conv) => (
-                <button
+                <div
                   key={conv.id}
                   onClick={() => { setActiveConvId(conv.id); setView("chat"); }}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all text-left ${
+                  className={`group w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-sm transition-all text-left cursor-pointer ${
                     activeConvId === conv.id
                       ? "bg-brand-600/20 text-brand-300 border border-brand-500/30"
                       : "text-slate-400 hover:text-slate-200 hover:bg-surface-hover"
                   }`}
                 >
-                  <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                  <span className="truncate">{conv.title}</span>
-                </button>
+                  <div className="flex items-center gap-2.5 truncate">
+                    <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                    <span className="truncate">{conv.title}</span>
+                  </div>
+                  <button
+                    onClick={(e) => deleteConversation(e, conv.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity text-slate-500"
+                    title="Delete conversation"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           )}

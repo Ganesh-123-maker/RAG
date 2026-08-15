@@ -33,7 +33,7 @@ async def test_chat_creates_conversation(test_client: AsyncClient) -> None:
     )
 
     with patch(
-        "app.services.agent_service.AgentService.run",
+        "app.routers.chat.AgentService.run",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -54,7 +54,7 @@ async def test_chat_continues_existing_conversation(test_client: AsyncClient) ->
     mock_result = RagAnswer(answer="First answer.", citations=[])
 
     with patch(
-        "app.services.agent_service.AgentService.run",
+        "app.routers.chat.AgentService.run",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -94,7 +94,7 @@ async def test_delete_conversation(test_client: AsyncClient) -> None:
     mock_result = RagAnswer(answer="Answer.", citations=[])
 
     with patch(
-        "app.services.agent_service.AgentService.run",
+        "app.routers.chat.AgentService.run",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):

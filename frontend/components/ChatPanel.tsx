@@ -131,10 +131,23 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
                   setMessages((prev) => {
                     const updated = [...prev];
                     const last = updated[updated.length - 1];
-                    if (last.streaming) {
+                    if (last && last.streaming) {
                       updated[updated.length - 1] = {
                         ...last,
                         content: accumulated,
+                      };
+                    }
+                    return updated;
+                  });
+                }
+                if (data.citations) {
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last) {
+                      updated[updated.length - 1] = {
+                        ...last,
+                        citations: data.citations,
                       };
                     }
                     return updated;

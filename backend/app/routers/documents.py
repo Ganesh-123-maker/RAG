@@ -28,7 +28,8 @@ async def upload_document(
     return DocumentResponse.model_validate(doc)
 
 
-@router.get("/", response_model=DocumentListResponse)
+@router.get("", response_model=DocumentListResponse)
+@router.get("/", response_model=DocumentListResponse, include_in_schema=False)
 async def list_documents(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
