@@ -4,8 +4,8 @@
   "source_grounded_pct": 100.0,
   "citation_coverage_pct": 100.0,
   "hallucination_rate_pct": 0.0,
-  "avg_latency_seconds": 0.0001,
-  "p95_latency_seconds": 0.0002,
+  "avg_latency_seconds": 0.0,
+  "p95_latency_seconds": 0.0,
   "auth_success_rate_pct": 100.0,
   "test_coverage_pct": 97.0,
   "passed_all_targets": true

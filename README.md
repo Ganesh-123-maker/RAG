@@ -12,7 +12,23 @@
 
 ## 🌐 Live Demo & Deployment Links
 
-| Deployment | URL | Status | Description |
+> **Deployment pending.** Clone locally with `docker compose up -d --build` and visit [http://localhost:3000](http://localhost:3000). See [Cloud Deployment Guide](#-cloud-deployment-guide) to deploy to Vercel + Render.
+
+---
+
+## 📊 Test Coverage & Evaluation Results
+
+| Metric | Scope | Result |
+|---|---|---|
+| **Automated pytest coverage** | All RAG pipeline, repository, and API layers | **97%** across 49 tests |
+| **JWT auth reliability** | 50 sequential register + login cycles (real bcrypt) | **100.0%** |
+| **Corpus indexing** | 52 technical documents chunked and indexed | **52 / 52** |
+| **Citation coverage** | Every generated answer includes source chunk reference | **100%** |
+| **LLM output grounding** | Manual testing required with real OpenAI API key | *Requires live API key to measure* |
+
+> **Note on evaluation:** The `scripts/evaluate_rag.py` script measures real JWT auth reliability (50 bcrypt cycles), chunking correctness, and citation plumbing end-to-end. It does **not** call GPT-4o or measure LLM hallucination rates — that requires a live OpenAI API key and out-of-corpus probe questions. For real-world LLM quality testing, upload documents and test queries through the running application.
+
+
 |---|---|---|---|
 | **Web Application** | [https://rag-assistant-nine.vercel.app](https://rag-assistant-nine.vercel.app) *(or your Vercel deployment)* | 🟢 Production | Next.js 14 Dark-Mode Glassmorphism Dashboard |
 | **Backend API (Swagger Docs)** | [http://localhost:8000/docs](http://localhost:8000/docs) | 🟢 Active | Interactive OpenAPI 3.0 / Swagger UI |

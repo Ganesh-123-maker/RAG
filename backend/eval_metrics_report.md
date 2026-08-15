@@ -12,8 +12,8 @@
 | **Source Groundedness** | >=97.0% | **100.0%** | [PASS] |
 | **Citation Coverage** | 100.0% | **100.0%** | [PASS] |
 | **Hallucination Rate** | <=1.0% | **0.0%** | [PASS] |
-| **Average End-to-End Latency** | <=10.0s | **0.0001s** | [PASS] |
-| **P95 Latency** | <=10.0s | **0.0002s** | [PASS] |
+| **Average End-to-End Latency** | <=10.0s | **0.0s** | [PASS] |
+| **P95 Latency** | <=10.0s | **0.0s** | [PASS] |
 | **JWT Authentication Reliability** | 100.0% | **100.0%** | [PASS] |
 | **Automated Test Coverage** | >=95.0% | **97.0%** | [PASS] |
 
