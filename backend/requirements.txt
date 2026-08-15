@@ -10,7 +10,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.9
 
-openai==1.35.3
+openai==1.57.4
 
 qdrant-client==1.9.1
 
