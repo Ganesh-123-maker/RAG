@@ -26,6 +26,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [streamStatus, setStreamStatus] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -88,6 +89,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
     setMessages((prev) => [...prev, userMsg, assistantPlaceholder]);
     setInput("");
     setSending(true);
+    setStreamStatus("");
 
     try {
       const token = Cookies.get("access_token");
@@ -126,6 +128,12 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
             if (trimmed.startsWith("data: ")) {
               try {
                 const data = JSON.parse(trimmed.slice(6));
+                if (data.status && !data.done) {
+                  // Phase C graph status events (grading, rewriting,
+                  // verifying); ignored by older clients, shown here as
+                  // a small progress line while streaming.
+                  setStreamStatus(data.status);
+                }
                 if (data.token) {
                   accumulated += data.token;
                   setMessages((prev) => {
@@ -157,6 +165,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
                   toast.error(data.error);
                 }
                 if (data.done) {
+                  setStreamStatus("");
                   // The backend's done event carries the parsed answer
                   // (CITATIONS block stripped) and final citations: use it
                   // so the streamed message matches what a reload shows.
@@ -197,6 +206,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
       setMessages((prev) => prev.slice(0, -1));
     } finally {
       setSending(false);
+      setStreamStatus("");
     }
   };
 
@@ -294,6 +304,11 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
               )}
             </button>
           </div>
+          {sending && streamStatus && (
+            <p className="text-xs text-slate-500 text-center mt-2" role="status">
+              {streamStatus}…
+            </p>
+          )}
           <p className="text-xs text-slate-600 text-center mt-2">
             Answers are grounded in your documents · GPT-4o + Qdrant
           </p>

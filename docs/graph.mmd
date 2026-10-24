@@ -1,0 +1,24 @@
+%% Phase C LangGraph — planner -> retriever -> grade -> [rewrite, once]
+%% -> reasoning -> verify -> [regenerate, once] -> response.
+%% Direct answers skip retrieval and verification entirely.
+flowchart TD
+    planner["planner<br/>LLM JSON plan<br/>fail-open to retrieval"]
+    retriever["retriever<br/>embed + Qdrant search<br/>owner filter, threshold, MMR"]
+    grade["grade_retrieval<br/>score-based, no LLM<br/>good iff top score >= grade threshold"]
+    rewrite["rewrite_query<br/>planner-style JSON rewrite<br/>fallback: previous query"]
+    reasoning["reasoning<br/>GPT-4o, delimited context<br/>strict mode after verify fail"]
+    verify["verify<br/>cited ids in retrieval AND<br/>token overlap with cited text"]
+    direct["direct_answer<br/>chit-chat, no documents<br/>no citations"]
+    response["response<br/>parse CITATIONS by chunk id"]
+
+    planner -->|needs_retrieval| retriever
+    planner -->|otherwise| direct
+    retriever --> grade
+    grade -->|poor AND retries < 1| rewrite
+    grade -->|good, or retries = 1| reasoning
+    rewrite --> retriever
+    reasoning --> verify
+    verify -->|fail AND attempts <= 1| reasoning
+    verify -->|pass, skipped, or final fail = refusal| response
+    direct --> response
+    response --> END

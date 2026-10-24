@@ -59,11 +59,13 @@ The following metrics are measured and verified via automated test suites and be
 - **Multi-Format Ingestion Engine** — Extract text seamlessly from PDF (`pdfplumber`), DOCX (`python-docx`), Markdown (`markdown`), and raw text files.
 - **Token-Aware Windowed Chunking** — Tiktoken (`cl100k_base`) with 512-token chunks and 64-token overlap to ensure zero loss of context at chunk boundaries.
 - **High-Dimensional Embeddings** — OpenAI `text-embedding-3-large` (3072 dimensions) with normalized vector embeddings.
-- **4-Node Agentic LangGraph State Machine**:
+- **Agentic LangGraph State Machine** (planner → retriever → grade → [rewrite + retry once] → reasoning → verify → [regenerate once] → response, or planner → direct answer):
   - `planner_node`: Analyzes dialog context, rewrites follow-up questions into standalone queries, and decides if retrieval is necessary.
   - `retriever_node`: Generates query embeddings and executes similarity search against Qdrant with payload filtering.
+  - `grade_retrieval_node`: Score-based retrieval grade; a poor grade triggers exactly one query rewrite and re-retrieval.
   - `reasoning_node`: Synthesizes answers using GPT-4o grounded strictly in retrieved chunks and conversational memory.
-  - `response_node`: Extracts source citations (document name, chunk index, similarity score, text snippet) and formats streaming events.
+  - `verify_node`: Deterministic check that the answer's cited chunk ids were retrieved and share substantive tokens with the answer; a failure regenerates once, then refuses.
+  - `response_node`: Extracts source citations by chunk id (document name, chunk index, page/section, similarity score, text snippet) and formats streaming events.
 - **Strict Multi-Tenant Isolation** — All Qdrant vector points are tagged with `owner_id` and queried with strict payload filters, preventing any cross-user data leakage.
 - **Real-Time Token Streaming** — SSE (Server-Sent Events) delivering live LLM tokens and instant citation cards.
 - **Modern Dark-Mode UI** — Next.js 14 App Router with Tailwind CSS, Lucide icons, drag-and-drop file uploaders, and interactive expandable source pills.
@@ -117,7 +119,7 @@ The following metrics are measured and verified via automated test suites and be
 |---|---|
 | **Frontend** | Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS, Lucide Icons, js-cookie, react-hot-toast |
 | **Backend API** | Python 3.11, FastAPI, Uvicorn, Pydantic v2, Pydantic-Settings |
-| **Agentic Framework** | LangGraph, LangChain Core, LangChain OpenAI |
+| **Agentic Framework** | LangGraph (direct OpenAI SDK; LangChain removed in Phase C — it was declared but never imported) |
 | **LLM & Embeddings** | OpenAI GPT-4o, `text-embedding-3-large` (3072 dimensions) |
 | **Vector Database** | Qdrant v1.9 (Payload filtered, Cosine distance) |
 | **Relational Database** | PostgreSQL 16 (production asyncpg) / SQLite (development aiosqlite) |
