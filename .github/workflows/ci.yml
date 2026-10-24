@@ -60,7 +60,7 @@ jobs:
           retention-days: 7
 
       - name: Upload coverage to Codecov (optional, non-blocking)
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           file: ./backend/coverage.xml
         continue-on-error: true
