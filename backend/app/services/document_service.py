@@ -179,6 +179,15 @@ class DocumentService:
             _cleanup_file(file_path)
             return existing.id
 
+        # Phase E queue: the row is created as "queued" and committed
+        # before processing starts, so a crash mid-ingestion leaves a
+        # real queued row (not a phantom "processing" row) that the
+        # worker can pick up, and clients polling GET /documents see
+        # queued -> processing -> ready/error with progress.
+        # BackgroundTasks was rejected: tasks are lost on restart and
+        # have no durable status. This queue is DB-backed; the
+        # synchronous ingest below is the worker for the common path,
+        # and process_queued_documents() is the recovery path.
         doc = await self._doc_repo.create(
             owner_id=owner_id,
             filename=safe_filename,
@@ -186,72 +195,161 @@ class DocumentService:
             file_type=file_ext,
             file_size_bytes=file_size,
             content_hash=content_hash,
+            status="queued",
         )
         doc_id = doc.id
-        vectors_upserted = False
-
-        try:
-            # CPU-bound parsing/tokenizing runs off the event loop.
-            file_bytes = await asyncio.to_thread(file_path.read_bytes)
-            segments = await asyncio.to_thread(extract_segments, file_bytes, file_ext)
-            raw_text = "\n\n".join(s.text for s in segments)
-            if not raw_text.strip():
-                raise ValueError("Document appears to be empty or unreadable")
-
-            chunks: list[TextChunk] = await asyncio.to_thread(
-                chunk_text,
-                raw_text,
-                doc_id,
-                file.filename or safe_filename,
-                settings.CHUNK_SIZE_TOKENS,
-                settings.CHUNK_OVERLAP_TOKENS,
-                segments,
-            )
-            if not chunks:
-                raise ValueError("Document produced no chunks")
-            # Chunk-level dedupe: identical chunk hashes within one
-            # document collapse to the first occurrence, renumbered.
-            seen_hashes: set[str] = set()
-            deduped: list[TextChunk] = []
-            for chunk in chunks:
-                if chunk.content_hash in seen_hashes:
-                    continue
-                seen_hashes.add(chunk.content_hash)
-                chunk.chunk_index = len(deduped)
-                deduped.append(chunk)
-            chunks = deduped
-            logger.info("Document %s chunked into %d chunks", doc_id, len(chunks))
-
-            texts = [c.text for c in chunks]
-            embeddings = await self._embed_svc.embed_batch(texts)
-
-            await self._vector_svc.ensure_collection()
-            await self._vector_svc.upsert_chunks(chunks, embeddings, owner_id)
-            vectors_upserted = True
-            logger.info("Upserted %d vectors for document %s", len(chunks), doc_id)
-
-            await self._doc_repo.mark_ready(
-                doc_id, chunk_count=len(chunks), owner_id=owner_id
-            )
-
-        except Exception as exc:
-            # Full error goes to the server log only; the client gets a
-            # safe message, and partial side effects are compensated.
-            logger.error("Ingestion failed for document %s", doc_id, exc_info=exc)
-            if vectors_upserted:
-                try:
-                    await self._vector_svc.delete_by_document(doc_id, owner_id)
-                except Exception as cleanup_exc:  # noqa: BLE001 -- best-effort cleanup must not raise
-                    logger.warning(
-                        "Vector cleanup failed for document %s: %s", doc_id, cleanup_exc
-                    )
-            _cleanup_file(file_path)
-            safe_message, status_code = _safe_ingestion_message(exc)
-            await self._doc_repo.mark_error(doc_id, safe_message, owner_id=owner_id)
-            await self._db.commit()
-            raise HTTPException(status_code=status_code, detail=safe_message) from exc
-
+        await self._doc_repo.set_status(doc_id, "queued", progress=0, owner_id=owner_id)
+        await self._db.commit()
+        await self._process_document(
+            doc_id=doc_id,
+            owner_id=owner_id,
+            file_path=file_path,
+            file_ext=file_ext,
+            document_name=file.filename or safe_filename,
+        )
         return doc_id
+
+    async def _process_document(
+        self,
+        doc_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        file_path: Path,
+        file_ext: str,
+        document_name: str,
+    ) -> None:
+        """Process one document: queued -> processing -> ready/error.
+
+        Bounded retry: at most INGESTION_MAX_ATTEMPTS attempts in
+        total (default 2), and ONLY for embedding failures. Retrying
+        every failure would be wrong: a failure after upsert (e.g. a
+        DB error in mark_ready) must clean up once and fail, not
+        re-run the pipeline and clean up twice. Embedding calls
+        already retry internally (tenacity); this is one extra
+        service-level retry for a transient provider outage.
+        """
+        max_attempts = max(1, settings.INGESTION_MAX_ATTEMPTS)
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            doc = await self._doc_repo.get_by_id_for_owner(doc_id, owner_id)
+            if doc is not None:
+                doc.ingestion_attempts = attempt
+            await self._doc_repo.set_status(
+                doc_id, "processing", progress=10, owner_id=owner_id
+            )
+            await self._db.commit()
+            vectors_upserted = False
+            try:
+                file_bytes = await asyncio.to_thread(file_path.read_bytes)
+                await self._doc_repo.set_status(
+                    doc_id, "processing", progress=30, owner_id=owner_id
+                )
+                segments = await asyncio.to_thread(extract_segments, file_bytes, file_ext)
+                raw_text = "\n\n".join(s.text for s in segments)
+                if not raw_text.strip():
+                    raise ValueError("Document appears to be empty or unreadable")
+                chunks: list[TextChunk] = await asyncio.to_thread(
+                    chunk_text,
+                    raw_text,
+                    doc_id,
+                    document_name,
+                    settings.CHUNK_SIZE_TOKENS,
+                    settings.CHUNK_OVERLAP_TOKENS,
+                    segments,
+                )
+                if not chunks:
+                    raise ValueError("Document produced no chunks")
+                seen_hashes: set[str] = set()
+                deduped: list[TextChunk] = []
+                for chunk in chunks:
+                    if chunk.content_hash in seen_hashes:
+                        continue
+                    seen_hashes.add(chunk.content_hash)
+                    chunk.chunk_index = len(deduped)
+                    deduped.append(chunk)
+                chunks = deduped
+                await self._doc_repo.set_status(
+                    doc_id, "processing", progress=50, owner_id=owner_id
+                )
+                texts = [c.text for c in chunks]
+                embeddings = await self._embed_svc.embed_batch(texts)
+                await self._doc_repo.set_status(
+                    doc_id, "processing", progress=80, owner_id=owner_id
+                )
+                await self._vector_svc.ensure_collection()
+                await self._vector_svc.upsert_chunks(chunks, embeddings, owner_id)
+                vectors_upserted = True
+                await self._doc_repo.mark_ready(
+                    doc_id, chunk_count=len(chunks), owner_id=owner_id
+                )
+                await self._db.commit()
+                return
+            except Exception as exc:  # noqa: BLE001 -- all failures become error rows
+                last_exc = exc
+                logger.error(
+                    "Ingestion attempt %s/%s failed for document %s",
+                    attempt,
+                    max_attempts,
+                    doc_id,
+                    exc_info=exc,
+                )
+                if isinstance(exc, EmbeddingError) and attempt < max_attempts:
+                    # Transient provider failure: retry without
+                    # cleanup (no vectors were upserted yet, since
+                    # embedding precedes upsert).
+                    logger.info(
+                        "Retrying ingestion for document %s after embedding failure",
+                        doc_id,
+                    )
+                    continue
+                if vectors_upserted:
+                    try:
+                        await self._vector_svc.delete_by_document(doc_id, owner_id)
+                    except Exception as cleanup_exc:  # noqa: BLE001
+                        logger.warning(
+                            "Vector cleanup failed for document %s: %s", doc_id, cleanup_exc
+                        )
+                _cleanup_file(file_path)
+                safe_message, status_code = _safe_ingestion_message(exc)
+                await self._doc_repo.mark_error(doc_id, safe_message, owner_id=owner_id)
+                await self._db.commit()
+                raise HTTPException(status_code=status_code, detail=safe_message) from exc
+        if last_exc is not None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Document ingestion failed. Please try again.",
+            ) from last_exc
+
+    async def process_queued_documents(self) -> dict[str, int]:
+        """Recovery worker: process every row left in 'queued'.
+
+        Used by backend/scripts/run_ingestion_worker.py and by tests.
+        A queued row whose file is gone (crash after cleanup) is
+        marked error instead of crashing the worker. Returns counts.
+        """
+        queued = await self._doc_repo.get_queued()
+        processed = 0
+        errored = 0
+        for doc in queued:
+            file_path = Path(settings.UPLOAD_DIR) / str(doc.owner_id) / doc.filename
+            if not file_path.exists():
+                await self._doc_repo.mark_error(
+                    doc.id, "Ingestion was interrupted; please re-upload.", owner_id=doc.owner_id
+                )
+                await self._db.commit()
+                errored += 1
+                continue
+            try:
+                await self._process_document(
+                    doc_id=doc.id,
+                    owner_id=doc.owner_id,
+                    file_path=file_path,
+                    file_ext=doc.file_type,
+                    document_name=doc.original_name,
+                )
+                processed += 1
+            except HTTPException:
+                errored += 1
+        return {"processed": processed, "errored": errored, "total": len(queued)}
 
     async def delete(self, doc_id: uuid.UUID, owner_id: uuid.UUID) -> None:
         doc = await self._doc_repo.get_by_id_for_owner(doc_id, owner_id)

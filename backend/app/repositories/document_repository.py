@@ -21,6 +21,7 @@ class DocumentRepository:
         file_type: str,
         file_size_bytes: int,
         content_hash: str | None = None,
+        status: str = "processing",
     ) -> Document:
         doc = Document(
             owner_id=owner_id,
@@ -29,11 +30,42 @@ class DocumentRepository:
             file_type=file_type,
             file_size_bytes=file_size_bytes,
             content_hash=content_hash,
-            status="processing",
+            status=status,
         )
         self._db.add(doc)
         await self._db.flush()
         return doc
+
+    async def set_status(
+        self,
+        doc_id: uuid.UUID,
+        status: str,
+        progress: int | None = None,
+        owner_id: uuid.UUID | None = None,
+    ) -> None:
+        """Phase E queue transition (queued -> processing -> ready/error)."""
+        doc = (
+            await self.get_by_id_for_owner(doc_id, owner_id)
+            if owner_id is not None
+            else await self.get_by_id(doc_id)
+        )
+        if doc:
+            doc.status = status
+            if progress is not None:
+                doc.ingestion_progress = max(0, min(100, progress))
+
+    async def get_queued(self) -> Sequence[Document]:
+        """Documents left in 'queued' (e.g. after a crash mid-upload).
+
+        The ingestion worker picks these up; see
+        DocumentService.process_queued_documents.
+        """
+        result = await self._db.execute(
+            select(Document)
+            .where(Document.status == "queued")
+            .order_by(Document.created_at.asc())
+        )
+        return result.scalars().all()
 
     async def get_by_content_hash_for_owner(
         self, owner_id: uuid.UUID, content_hash: str
@@ -80,6 +112,7 @@ class DocumentRepository:
         if doc:
             doc.status = "ready"
             doc.chunk_count = chunk_count
+            doc.ingestion_progress = 100
 
     async def mark_error(
         self, doc_id: uuid.UUID, message: str, owner_id: uuid.UUID | None = None

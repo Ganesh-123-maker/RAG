@@ -6,7 +6,6 @@ import Link from "next/link";
 import { Brain, Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "@/lib/api";
-import Cookies from "js-cookie";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,8 +18,9 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await api.post("/api/v1/auth/login", { email, password });
-      Cookies.set("access_token", res.data.access_token, { path: "/", expires: 1 });
+      // Phase E: the backend sets an httpOnly cookie on this
+      // response; the frontend must NOT store the token in JS.
+      await api.post("/api/v1/auth/login", { email, password });
       toast.success("Welcome back!");
       router.push("/dashboard");
     } catch (err: unknown) {

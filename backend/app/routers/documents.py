@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
+from app.core.rate_limit import check_rate_limit
 from app.repositories.document_repository import DocumentRepository
 from app.schemas.document import DocumentListResponse, DocumentResponse
 from app.services.document_service import DocumentService
@@ -20,6 +22,12 @@ async def upload_document(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ) -> DocumentResponse:
+    settings = get_settings()
+    check_rate_limit(
+        f"upload:{current_user.id}",
+        settings.UPLOAD_RATE_LIMIT_PER_MINUTE,
+        60,
+    )
     svc = DocumentService(db)
     doc_id = await svc.ingest(file=file, owner_id=current_user.id)
 

@@ -67,6 +67,28 @@ class Settings(BaseSettings):
     HISTORY_MAX_TOKENS: int = 2000
     CHAT_MAX_TOKENS: int = 1000
 
+    # Phase E hardening (all single-instance / in-memory unless noted).
+    # RATE_LIMIT_ENABLED=None means: on everywhere except ENVIRONMENT=test
+    # (the test suite makes many calls as one user in one process).
+    RATE_LIMIT_ENABLED: bool | None = None
+    AUTH_RATE_LIMIT_PER_MINUTE: int = 10
+    UPLOAD_RATE_LIMIT_PER_MINUTE: int = 10
+    CHAT_RATE_LIMIT_PER_MINUTE: int = 30
+    # Per-user daily quotas. The token budget is an ESTIMATE (the agent
+    # service does not return metered usage): question+answer chars / 4.
+    # It is a cost guard, not a billing measurement — never present it
+    # as metered OpenAI usage.
+    DAILY_CHAT_REQUESTS: int = 200
+    DAILY_TOKEN_BUDGET_EST: int = 200000
+    LOGIN_MAX_FAILED_ATTEMPTS: int = 5
+    LOCKOUT_MINUTES: int = 15
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 3
+    CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 60.0
+    INGESTION_MAX_ATTEMPTS: int = 2
+    # Optional Sentry DSN. Absent (the default) means no-op: Sentry is
+    # never required to boot and no spans/errors leave the process.
+    SENTRY_DSN: str | None = None
+
     @field_validator("OPENAI_EMBEDDING_DIMENSIONS")
     @classmethod
     def _validate_dims(cls, v: int) -> int:
@@ -83,6 +105,49 @@ class Settings(BaseSettings):
         if not 0.0 <= v <= 1.0:
             raise ValueError("value must be in 0..1")
         return v
+
+    @field_validator(
+        "MAX_UPLOAD_SIZE_MB",
+        "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
+        "RETRIEVAL_TOP_K",
+        "RETRIEVAL_FETCH_K",
+        "AUTH_RATE_LIMIT_PER_MINUTE",
+        "UPLOAD_RATE_LIMIT_PER_MINUTE",
+        "CHAT_RATE_LIMIT_PER_MINUTE",
+        "DAILY_CHAT_REQUESTS",
+        "DAILY_TOKEN_BUDGET_EST",
+        "LOGIN_MAX_FAILED_ATTEMPTS",
+        "LOCKOUT_MINUTES",
+        "CIRCUIT_BREAKER_FAILURE_THRESHOLD",
+        "INGESTION_MAX_ATTEMPTS",
+    )
+    @classmethod
+    def _validate_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("value must be positive")
+        return v
+
+    @model_validator(mode="after")
+    def _cross_field_checks(self) -> "Settings":
+        if self.RETRIEVAL_TOP_K > self.RETRIEVAL_FETCH_K:
+            raise ValueError("RETRIEVAL_TOP_K must be <= RETRIEVAL_FETCH_K")
+        if self.CHUNK_OVERLAP_TOKENS >= self.CHUNK_SIZE_TOKENS:
+            raise ValueError("CHUNK_OVERLAP_TOKENS must be < CHUNK_SIZE_TOKENS")
+        # CORS with credentials: a wildcard origin is a misconfiguration.
+        # Fail loudly in production; warn loudly elsewhere (the app
+        # still boots locally, but the warning is in the startup log).
+        origins = self.BACKEND_CORS_ORIGINS or []
+        if "*" in origins:
+            if (self.ENVIRONMENT or "development").lower() == "production":
+                raise ValueError(
+                    "BACKEND_CORS_ORIGINS must not contain '*' in production "
+                    "when credentials are allowed"
+                )
+            logger.warning(
+                "BACKEND_CORS_ORIGINS contains '*'; with allow_credentials "
+                "this is unsafe outside local development."
+            )
+        return self
 
     @model_validator(mode="after")
     def _dev_jwt_secret(self) -> "Settings":

@@ -20,6 +20,12 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(128), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(default=True)
+    # Phase E login lockout: consecutive failed logins, and the time
+    # until which login is refused (None = not locked).
+    failed_login_attempts: Mapped[int] = mapped_column(default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

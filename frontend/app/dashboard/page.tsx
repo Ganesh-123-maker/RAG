@@ -16,7 +16,6 @@ import {
   ChevronRight,
   Loader2,
 } from "lucide-react";
-import Cookies from "js-cookie";
 import toast from "react-hot-toast";
 import { useDropzone } from "react-dropzone";
 import { authApi, type Document, type Conversation } from "@/lib/api";
@@ -57,19 +56,15 @@ export default function DashboardPage() {
       }
     } catch (authErr) {
       console.error("Authentication check failed:", authErr);
-      Cookies.remove("access_token", { path: "/" });
       router.push("/login");
     } finally {
       setLoading(false);
     }
   }, [router]);
 
+  // Phase E: no cookie presence check is possible (httpOnly).
+  // fetchData proves auth via GET /me and redirects on failure.
   useEffect(() => {
-    const token = Cookies.get("access_token");
-    if (!token) {
-      router.push("/login");
-      return;
-    }
     fetchData();
   }, [fetchData, router]);
 
@@ -134,8 +129,14 @@ export default function DashboardPage() {
     }
   };
 
-  const handleLogout = () => {
-    Cookies.remove("access_token", { path: "/" });
+  const handleLogout = async () => {
+    // Phase E: revoke server-side (denylist) and clear the httpOnly
+    // cookie; a JS-only cookie removal would not revoke the token.
+    try {
+      await authApi().post("/api/v1/auth/logout");
+    } catch {
+      // Still navigate to login even if logout fails.
+    }
     router.push("/login");
   };
 

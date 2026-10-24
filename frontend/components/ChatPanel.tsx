@@ -6,7 +6,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import toast from "react-hot-toast";
 import { authApi, type Message, type Citation } from "@/lib/api";
-import Cookies from "js-cookie";
 import clsx from "clsx";
 
 interface ChatPanelProps {
@@ -92,13 +91,13 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
     setStreamStatus("");
 
     try {
-      const token = Cookies.get("access_token");
-
+      // Phase E: httpOnly cookie is sent automatically by the
+      // browser on this same-origin request; no token in JS.
       const res = await fetch(`/api/v1/chat/stream`, {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           question,
