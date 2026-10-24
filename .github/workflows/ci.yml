@@ -156,9 +156,13 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      # --legacy-peer-deps matches the repo's install convention
+      # (Dockerfile, setup.ps1): plain npm ci fails on vitest 5 /
+      # vite / @types/node peer conflicts, which are upstream and
+      # unrelated to this project's code.
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: TypeScript type check
         working-directory: ./frontend
@@ -212,9 +216,13 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      # --legacy-peer-deps matches the repo's install convention
+      # (Dockerfile, setup.ps1): plain npm ci fails on vitest 5 /
+      # vite / @types/node peer conflicts, which are upstream and
+      # unrelated to this project's code.
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: npm audit
         working-directory: ./frontend

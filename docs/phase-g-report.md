@@ -65,7 +65,7 @@ and PRs to `main`/`master`.
   clean (see docs/SECURITY.md). Non-blocking here means "visible
   but not gating", not "ignored": findings are documented with
   counts, reasons, and a review note.
-- **Frontend (blocking):** Node 20, `npm ci`, `tsc --noEmit`,
+- **Frontend (blocking):** Node 20, `npm ci --legacy-peer-deps` (plain `npm ci` fails on vitest 5 / vite / @types/node peer conflicts; this matches the Dockerfile and setup.ps1 convention), `tsc --noEmit`,
   `npm run lint`, Vitest, `next build`, Playwright chromium
   install, then Playwright E2E in mock-API mode. The server and
   the tests share one step on purpose: a background process
