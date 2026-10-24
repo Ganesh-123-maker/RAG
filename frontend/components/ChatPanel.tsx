@@ -153,8 +153,29 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
                     return updated;
                   });
                 }
-                if (data.done && data.conversation_id && !conversationId) {
-                  onConversationCreated(data.conversation_id);
+                if (data.error) {
+                  toast.error(data.error);
+                }
+                if (data.done) {
+                  // The backend's done event carries the parsed answer
+                  // (CITATIONS block stripped) and final citations: use it
+                  // so the streamed message matches what a reload shows.
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last) {
+                      updated[updated.length - 1] = {
+                        ...last,
+                        content: data.answer ?? last.content,
+                        citations: data.citations ?? last.citations,
+                        streaming: false,
+                      };
+                    }
+                    return updated;
+                  });
+                  if (data.conversation_id && !conversationId) {
+                    onConversationCreated(data.conversation_id);
+                  }
                 }
               } catch {
               }
