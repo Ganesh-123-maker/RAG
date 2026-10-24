@@ -1,0 +1,22 @@
+# Phase G: automated dependency updates. PRs are reviewed, never
+# auto-merged: a dependency upgrade here (notably FastAPI/starlette
+# and LangGraph) needs the full test suite + a compose smoke run,
+# which is why the 71 pip-audit records are documented as accepted
+# risk in docs/SECURITY.md rather than upgraded blindly.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

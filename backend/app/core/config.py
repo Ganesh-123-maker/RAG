@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from pathlib import Path
-from typing import List
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,7 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
 
     ENVIRONMENT: str = "development"
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     OPENAI_API_KEY: str
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
@@ -128,7 +126,7 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def _cross_field_checks(self) -> "Settings":
+    def _cross_field_checks(self) -> Settings:
         if self.RETRIEVAL_TOP_K > self.RETRIEVAL_FETCH_K:
             raise ValueError("RETRIEVAL_TOP_K must be <= RETRIEVAL_FETCH_K")
         if self.CHUNK_OVERLAP_TOKENS >= self.CHUNK_SIZE_TOKENS:
@@ -150,7 +148,7 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _dev_jwt_secret(self) -> "Settings":
+    def _dev_jwt_secret(self) -> Settings:
         if self.JWT_SECRET_KEY:
             return self
         if (self.ENVIRONMENT or "development").lower() == "production":
@@ -164,7 +162,7 @@ class Settings(BaseSettings):
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def parse_cors(cls, v: str | List[str]) -> List[str]:
+    def parse_cors(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
             v_stripped = v.strip()
             if v_stripped.startswith("[") and v_stripped.endswith("]"):
@@ -172,7 +170,7 @@ class Settings(BaseSettings):
 
                 try:
                     return json.loads(v_stripped)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 -- non-JSON string is not an error here
                     pass
             return [x.strip() for x in v.split(",") if x.strip()]
         return v

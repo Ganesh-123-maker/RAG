@@ -30,12 +30,12 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
+    # No healthcheck here on purpose (Phase G): the qdrant/qdrant
+    # image ships no wget/curl, so an in-container HTTP healthcheck
+    # fails forever and `docker compose up` reports Qdrant unhealthy
+    # even when it is running (proven by CI compose-smoke on PR #7).
+    # Readiness is instead waited on by backend/entrypoint.sh
+    # (Python stdlib poll of /healthz) and re-checked by /ready.
 
   # ── FastAPI Backend ───────────────────────────────────────────────────────────
   backend:
@@ -67,8 +67,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # service_started, not service_healthy: Qdrant has no
+      # healthcheck (see above); entrypoint.sh waits for it.
       qdrant:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 15s

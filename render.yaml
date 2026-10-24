@@ -1,0 +1,50 @@
+# Render deployment (Phase G) -- backend only. Frontend deploys to
+# Vercel (see docs/DEPLOYMENT.md); Vercel needs no config file for
+# Next.js, so there is deliberately no vercel.json in this repo.
+#
+# Why Render, and what it does NOT do by itself:
+# - Render's `fromDatabase` connection string uses the `postgres://`
+#   scheme, but this app (SQLAlchemy async + Alembic) requires
+#   `postgresql+asyncpg://`. After first applying this file, edit the
+#   web service's DATABASE_URL in the Render dashboard to the
+#   Postgres internal URL with that scheme substituted. Until that
+#   edit, the service will fail to start -- that is documented, not
+#   hidden, in docs/DEPLOYMENT.md.
+# - Qdrant is NOT hosted by Render here: use Qdrant Cloud's free
+#   tier and set QDRANT_HOST (e.g. <cluster>.qdrant.io),
+#   QDRANT_PORT=443, and QDRANT_API_KEY as secrets below.
+# - OPENAI_API_KEY, JWT_SECRET_KEY, and QDRANT_API_KEY are marked
+#   `sync: false` on purpose: they must be set in the Render
+#   dashboard (or via the Render API), never committed here.
+services:
+  - type: web
+    name: rag-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rag-postgres
+          property: connectionString
+      - key: QDRANT_HOST
+        sync: false
+      - key: QDRANT_PORT
+        value: "443"
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: BACKEND_CORS_ORIGINS
+        value: "https://rag-assistant-nine.vercel.app"
+        # Replace with the actual Vercel URL once the frontend exists;
+        # production startup rejects '*' in CORS origins (see config.py).
+
+databases:
+  - name: rag-postgres
+    plan: free
+    postgresMajorVersion: "16"

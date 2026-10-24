@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
@@ -188,9 +188,7 @@ async def get_conversation(
     )
 
 
-@router.patch(
-    "/conversations/{conversation_id}", response_model=ConversationResponse
-)
+@router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def rename_conversation(
     conversation_id: uuid.UUID,
     payload: ConversationUpdate,

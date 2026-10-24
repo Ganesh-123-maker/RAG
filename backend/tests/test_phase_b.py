@@ -83,8 +83,9 @@ class TestExtractionMetadata:
 
     def test_scanned_pdf_raises(self) -> None:
         pages = [_FakePage("", images=[object()]), _FakePage("", images=[object()])]
-        with patch("pdfplumber.open", return_value=_FakePdf(pages)), pytest.raises(
-            ScannedDocumentError, match="scanned"
+        with (
+            patch("pdfplumber.open", return_value=_FakePdf(pages)),
+            pytest.raises(ScannedDocumentError, match="scanned"),
         ):
             extract_segments(b"%PDF-fake", "pdf")
 

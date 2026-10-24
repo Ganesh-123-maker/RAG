@@ -16,7 +16,9 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(
+        String(320), unique=True, nullable=False, index=True
+    )
     hashed_password: Mapped[str] = mapped_column(String(128), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(default=True)
@@ -30,10 +32,10 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    documents: Mapped[list["Document"]] = relationship(  # noqa: F821
+    documents: Mapped[list[Document]] = relationship(  # noqa: F821
         "Document", back_populates="owner", cascade="all, delete-orphan"
     )
-    conversations: Mapped[list["Conversation"]] = relationship(  # noqa: F821
+    conversations: Mapped[list[Conversation]] = relationship(  # noqa: F821
         "Conversation", back_populates="owner", cascade="all, delete-orphan"
     )
 

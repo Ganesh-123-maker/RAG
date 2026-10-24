@@ -1,9 +1,8 @@
 """Phase F: conversation rename (owner-scoped PATCH endpoint)."""
+
 from __future__ import annotations
 
 import uuid
-
-import pytest
 
 from app.models.conversation import Conversation
 from app.repositories.conversation_repository import ConversationRepository
@@ -33,7 +32,9 @@ async def test_rename_empty_title_rejected(test_client, db_session, fake_user):
     assert resp.status_code == 422
 
 
-async def test_rename_other_users_conversation_is_404(test_client, db_session, fake_user):
+async def test_rename_other_users_conversation_is_404(
+    test_client, db_session, fake_user
+):
     conv = await _make_conversation(db_session, uuid.uuid4())
     resp = await test_client.patch(
         f"/api/v1/chat/conversations/{conv.id}", json={"title": "Hijack"}

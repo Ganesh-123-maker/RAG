@@ -47,3 +47,7 @@ Thumbs.db
 
 # Alembic cache
 alembic/__pycache__/
+
+# Playwright test output
+test-results/
+playwright-report/

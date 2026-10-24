@@ -172,7 +172,10 @@ async def test_stream_nonstream_equivalence() -> None:
             return_value=_mock_llm(
                 plan,
                 reasoning,
-                stream_tokens=["Par", f"is.\n\nCITATIONS:\n[{_CHUNK.chunk_id}] facts.txt, chunk 0"],
+                stream_tokens=[
+                    "Par",
+                    f"is.\n\nCITATIONS:\n[{_CHUNK.chunk_id}] facts.txt, chunk 0",
+                ],
             ),
         ),
         patch(
@@ -195,7 +198,10 @@ async def test_stream_nonstream_equivalence() -> None:
             return_value=_mock_llm(
                 plan,
                 reasoning,
-                stream_tokens=["Par", f"is.\n\nCITATIONS:\n[{_CHUNK.chunk_id}] facts.txt, chunk 0"],
+                stream_tokens=[
+                    "Par",
+                    f"is.\n\nCITATIONS:\n[{_CHUNK.chunk_id}] facts.txt, chunk 0",
+                ],
             ),
         ),
         patch(

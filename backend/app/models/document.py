@@ -42,7 +42,7 @@ class Document(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    owner: Mapped["User"] = relationship("User", back_populates="documents")  # noqa: F821
+    owner: Mapped[User] = relationship("User", back_populates="documents")  # noqa: F821
 
     def __repr__(self) -> str:
         return f"<Document id={self.id} name={self.original_name} status={self.status}>"

@@ -1,4 +1,5 @@
 """Tests for the chunking and text extraction pipeline."""
+
 from __future__ import annotations
 
 import uuid
@@ -27,7 +28,9 @@ class TestExtractText:
 class TestChunkText:
     def test_short_text_single_chunk(self) -> None:
         doc_id = uuid.uuid4()
-        chunks = chunk_text("Short text.", doc_id, "test.txt", chunk_size=512, overlap=64)
+        chunks = chunk_text(
+            "Short text.", doc_id, "test.txt", chunk_size=512, overlap=64
+        )
         assert len(chunks) == 1
         assert chunks[0].chunk_index == 0
         assert chunks[0].document_id == doc_id

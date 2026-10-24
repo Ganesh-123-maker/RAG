@@ -17,16 +17,22 @@ class Conversation(Base):
         Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     owner_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     title: Mapped[str] = mapped_column(String(512), default="New conversation")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    owner: Mapped["User"] = relationship("User", back_populates="conversations")  # noqa: F821
-    messages: Mapped[list["Message"]] = relationship(
-        "Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
+    owner: Mapped[User] = relationship("User", back_populates="conversations")  # noqa: F821
+    messages: Mapped[list[Message]] = relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.created_at",
     )
 
 
@@ -49,4 +55,6 @@ class Message(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
+    conversation: Mapped[Conversation] = relationship(
+        "Conversation", back_populates="messages"
+    )
