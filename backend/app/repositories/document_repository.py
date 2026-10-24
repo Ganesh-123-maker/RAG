@@ -34,7 +34,17 @@ class DocumentRepository:
         return doc
 
     async def get_by_id(self, doc_id: uuid.UUID) -> Document | None:
+        """Deprecated: unscoped lookup. Production callers must use
+        :meth:`get_by_id_for_owner`. Kept only for existing tests."""
         result = await self._db.execute(select(Document).where(Document.id == doc_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_id_for_owner(
+        self, doc_id: uuid.UUID, owner_id: uuid.UUID
+    ) -> Document | None:
+        result = await self._db.execute(
+            select(Document).where(Document.id == doc_id, Document.owner_id == owner_id)
+        )
         return result.scalar_one_or_none()
 
     async def get_by_owner(self, owner_id: uuid.UUID) -> Sequence[Document]:
@@ -45,19 +55,40 @@ class DocumentRepository:
         )
         return result.scalars().all()
 
-    async def mark_ready(self, doc_id: uuid.UUID, chunk_count: int) -> None:
-        doc = await self.get_by_id(doc_id)
+    async def mark_ready(
+        self, doc_id: uuid.UUID, chunk_count: int, owner_id: uuid.UUID | None = None
+    ) -> None:
+        doc = (
+            await self.get_by_id_for_owner(doc_id, owner_id)
+            if owner_id is not None
+            else await self.get_by_id(doc_id)
+        )
         if doc:
             doc.status = "ready"
             doc.chunk_count = chunk_count
 
-    async def mark_error(self, doc_id: uuid.UUID, message: str) -> None:
-        doc = await self.get_by_id(doc_id)
+    async def mark_error(
+        self, doc_id: uuid.UUID, message: str, owner_id: uuid.UUID | None = None
+    ) -> None:
+        doc = (
+            await self.get_by_id_for_owner(doc_id, owner_id)
+            if owner_id is not None
+            else await self.get_by_id(doc_id)
+        )
         if doc:
             doc.status = "error"
             doc.error_message = message
 
     async def delete(self, doc_id: uuid.UUID) -> None:
+        """Deprecated: unscoped delete. Production callers must use
+        :meth:`delete_for_owner`. Kept only for existing tests."""
         doc = await self.get_by_id(doc_id)
         if doc:
             await self._db.delete(doc)
+
+    async def delete_for_owner(self, doc_id: uuid.UUID, owner_id: uuid.UUID) -> bool:
+        doc = await self.get_by_id_for_owner(doc_id, owner_id)
+        if doc is None:
+            return False
+        await self._db.delete(doc)
+        return True

@@ -24,7 +24,7 @@ async def upload_document(
     doc_id = await svc.ingest(file=file, owner_id=current_user.id)
 
     repo = DocumentRepository(db)
-    doc = await repo.get_by_id(doc_id)
+    doc = await repo.get_by_id_for_owner(doc_id, current_user.id)
     return DocumentResponse.model_validate(doc)
 
 
@@ -49,8 +49,8 @@ async def get_document(
     db: AsyncSession = Depends(get_db),
 ) -> DocumentResponse:
     repo = DocumentRepository(db)
-    doc = await repo.get_by_id(document_id)
-    if doc is None or doc.owner_id != current_user.id:
+    doc = await repo.get_by_id_for_owner(document_id, current_user.id)
+    if doc is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     return DocumentResponse.model_validate(doc)
 
