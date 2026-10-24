@@ -87,6 +87,18 @@ class ConversationRepository:
         if conv:
             await self._db.delete(conv)
 
+    async def update_title_for_owner(
+        self, conversation_id: uuid.UUID, owner_id: uuid.UUID, title: str
+    ) -> Conversation | None:
+        """Owner-scoped rename (Phase F). Returns None for a
+        conversation owned by someone else — never another user's row."""
+        conv = await self.get_conversation(conversation_id, owner_id)
+        if conv is None:
+            return None
+        conv.title = title
+        await self._db.flush()
+        return conv
+
     async def delete_conversation_for_owner(
         self, conversation_id: uuid.UUID, owner_id: uuid.UUID
     ) -> bool:

@@ -1,5 +1,39 @@
-import axios from "axios";
+import axios, { type AxiosError } from "axios";
+
 const BASE_URL = "";
+
+// Phase F: a SINGLE axios instance for the whole app. Previously
+// authApi() created a brand-new instance per call, so no interceptor
+// could ever be shared. `authApi` is kept as an alias for the same
+// instance so existing imports keep working.
+//
+// Auth is cookie-based (Phase E): the backend sets an httpOnly
+// cookie on /auth/login and the browser sends it automatically on
+// same-origin requests (withCredentials). JS never holds, reads,
+// or writes a token — do not reintroduce js-cookie token handling.
+
+export function getApiErrorMessage(err: unknown): string {
+  const error = err as AxiosError<{ detail?: unknown }> | { response?: { data?: { detail?: unknown } } };
+  const detail =
+    (error as AxiosError<{ detail?: unknown }>)?.response?.data?.detail ??
+    (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (err instanceof Error && err.message) return err.message;
+  return "Something went wrong. Please try again.";
+}
+
+/** Pure redirect decision, unit-tested: a 401 on /login itself
+ * must not redirect (that would loop); anywhere else it does. */
+export function shouldRedirectOnUnauthorized(pathname: string): boolean {
+  return pathname !== "/login";
+}
+
+/** Redirect to /login on a 401, unless already there. */
+export function handleUnauthorized(): void {
+  if (typeof window === "undefined") return;
+  if (!shouldRedirectOnUnauthorized(window.location.pathname)) return;
+  window.location.href = "/login";
+}
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -7,18 +41,21 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-// Phase E: no JS token handling. The backend sets an httpOnly
-// cookie on /auth/login; the browser sends it automatically on
-// same-origin requests (withCredentials), so JS never holds the
-// token and cannot leak it via XSS. Bearer auth is still
-// supported server-side for non-browser API clients.
-export const authApi = () => {
-  return axios.create({
-    baseURL: BASE_URL,
-    headers: { "Content-Type": "application/json" },
-    withCredentials: true,
-  });
-};
+api.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    if (error?.response?.status === 401) {
+      handleUnauthorized();
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Alias: same shared instance, not a fresh client per call.
+export const authApi = () => api;
+
+export const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024;
+export const ALLOWED_UPLOAD_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"] as const;
 
 export interface Document {
   id: string;
@@ -26,8 +63,10 @@ export interface Document {
   file_type: string;
   file_size_bytes: number;
   chunk_count: number;
-  status: "processing" | "ready" | "error";
+  status: "queued" | "processing" | "ready" | "error";
   error_message: string | null;
+  ingestion_progress?: number;
+  ingestion_attempts?: number;
   created_at: string;
 }
 

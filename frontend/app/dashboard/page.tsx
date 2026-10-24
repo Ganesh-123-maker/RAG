@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Brain,
@@ -15,13 +15,21 @@ import {
   AlertCircle,
   ChevronRight,
   Loader2,
+  Menu,
+  X,
+  Pencil,
+  RotateCcw,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useDropzone } from "react-dropzone";
-import { authApi, type Document, type Conversation } from "@/lib/api";
+import { authApi, getApiErrorMessage, type Document, type Conversation } from "@/lib/api";
+import { validateUploadFile } from "@/lib/validation";
 import ChatPanel from "@/components/ChatPanel";
 
 type View = "upload" | "chat";
+
+const TERMINAL_DOC_STATUSES = ["ready", "error"];
+const isNonTerminal = (d: Document) => !TERMINAL_DOC_STATUSES.includes(d.status);
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -31,66 +39,107 @@ export default function DashboardPage() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [docsError, setDocsError] = useState<string | null>(null);
+  const [convsError, setConvsError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [visibleConvCount, setVisibleConvCount] = useState(15);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchDocs = useCallback(async () => {
+    try {
+      const docsRes = await authApi().get("/api/v1/documents/");
+      setDocuments(docsRes.data.documents || []);
+      setDocsError(null);
+    } catch (err) {
+      setDocsError(getApiErrorMessage(err));
+    }
+  }, []);
+
+  const fetchConvs = useCallback(async () => {
+    try {
+      const convsRes = await authApi().get("/api/v1/chat/conversations");
+      setConversations(convsRes.data.conversations || []);
+      setConvsError(null);
+    } catch (err) {
+      setConvsError(getApiErrorMessage(err));
+    }
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
-      const api = authApi();
-      const meRes = await api.get("/api/v1/auth/me");
+      const meRes = await authApi().get("/api/v1/auth/me");
       setUserEmail(meRes.data.email);
-
-      try {
-        const docsRes = await api.get("/api/v1/documents/");
-        setDocuments(docsRes.data.documents || []);
-      } catch (docErr) {
-        console.error("Failed to fetch documents:", docErr);
-        setDocuments([]);
-      }
-
-      try {
-        const convsRes = await api.get("/api/v1/chat/conversations");
-        setConversations(convsRes.data.conversations || []);
-      } catch (convErr) {
-        console.error("Failed to fetch conversations:", convErr);
-        setConversations([]);
-      }
+      await Promise.all([fetchDocs(), fetchConvs()]);
     } catch (authErr) {
-      console.error("Authentication check failed:", authErr);
+      // /me failure means the session is gone (401 interceptor
+      // also redirects); stay out of a half-loaded dashboard.
+      if ((authErr as { response?: { status?: number } })?.response?.status !== 401) {
+        toast.error(getApiErrorMessage(authErr));
+      }
       router.push("/login");
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [router, fetchDocs, fetchConvs]);
 
   // Phase E: no cookie presence check is possible (httpOnly).
   // fetchData proves auth via GET /me and redirects on failure.
   useEffect(() => {
     fetchData();
-  }, [fetchData, router]);
+  }, [fetchData]);
+
+  // Poll document status only while any document is non-terminal
+  // (queued/processing), every 2.5s; stop as soon as all are
+  // terminal so a ready library costs no polling traffic.
+  useEffect(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (documents.some(isNonTerminal)) {
+      pollingRef.current = setInterval(() => {
+        void fetchDocs();
+      }, 2500);
+    }
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [documents, fetchDocs]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
     const file = acceptedFiles[0];
+    const validationError = validateUploadFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
     const formData = new FormData();
     formData.append("file", file);
     setUploading(true);
     try {
-      const api = authApi();
-      await api.post("/api/v1/documents/upload", formData, {
+      await authApi().post("/api/v1/documents/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       toast.success(`"${file.name}" uploaded and indexed!`);
-      await fetchData();
+      await fetchDocs();
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      toast.error(error.response?.data?.detail || "Upload failed");
+      toast.error(getApiErrorMessage(err));
     } finally {
       setUploading(false);
     }
-  }, [fetchData]);
+  }, [fetchDocs]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected: (rejections) => {
+      const first = rejections[0];
+      const message = first?.errors?.[0]?.message;
+      toast.error(message || "File rejected. Allowed: PDF, DOCX, TXT, MD, max 50 MB.");
+    },
     accept: {
       "application/pdf": [".pdf"],
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
@@ -98,18 +147,18 @@ export default function DashboardPage() {
       "text/markdown": [".md"],
     },
     maxFiles: 1,
+    maxSize: 50 * 1024 * 1024,
     disabled: uploading,
   });
 
   const deleteDocument = async (docId: string, name: string) => {
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
     try {
-      const api = authApi();
-      await api.delete(`/api/v1/documents/${docId}`);
+      await authApi().delete(`/api/v1/documents/${docId}`);
       toast.success("Document deleted");
       setDocuments((prev) => prev.filter((d) => d.id !== docId));
-    } catch {
-      toast.error("Failed to delete document");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err));
     }
   };
 
@@ -117,15 +166,30 @@ export default function DashboardPage() {
     e.stopPropagation();
     if (!confirm("Delete this conversation?")) return;
     try {
-      const api = authApi();
-      await api.delete(`/api/v1/chat/conversations/${convId}`);
+      await authApi().delete(`/api/v1/chat/conversations/${convId}`);
       toast.success("Conversation deleted");
       setConversations((prev) => prev.filter((c) => c.id !== convId));
       if (activeConvId === convId) {
         setActiveConvId(null);
       }
-    } catch {
-      toast.error("Failed to delete conversation");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err));
+    }
+  };
+
+  const saveRename = async (convId: string) => {
+    const title = renameValue.trim();
+    if (!title) {
+      toast.error("Title cannot be empty");
+      return;
+    }
+    try {
+      await authApi().patch(`/api/v1/chat/conversations/${convId}`, { title });
+      setConversations((prev) => prev.map((c) => (c.id === convId ? { ...c, title } : c)));
+      setRenamingId(null);
+      toast.success("Conversation renamed");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err));
     }
   };
 
@@ -144,6 +208,8 @@ export default function DashboardPage() {
     switch (status) {
       case "ready":
         return <span className="badge-ready"><CheckCircle className="w-3 h-3" /> Ready</span>;
+      case "queued":
+        return <span className="badge-processing"><Clock className="w-3 h-3" /> Queued</span>;
       case "processing":
         return <span className="badge-processing"><Clock className="w-3 h-3" /> Processing</span>;
       case "error":
@@ -161,99 +227,189 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" role="status" aria-label="Loading dashboard">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-8 h-8 text-brand-400 animate-spin" />
           <p className="text-slate-400">Loading your knowledge base…</p>
+          {/* Skeleton rows: the page is loading, not empty. */}
+          <div className="w-72 space-y-2" aria-hidden="true">
+            <div className="h-10 rounded-xl bg-surface-card animate-pulse" />
+            <div className="h-10 rounded-xl bg-surface-card animate-pulse" />
+            <div className="h-10 rounded-xl bg-surface-card animate-pulse" />
+          </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen flex">
-      <aside className="w-72 flex-shrink-0 border-r border-surface-border bg-surface-card flex flex-col">
-        <div className="p-6 border-b border-surface-border">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
-              <Brain className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-semibold text-slate-100">RAG Assistant</span>
+  const sidebar = (
+    <>
+      <div className="p-6 border-b border-surface-border">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
+            <Brain className="w-4 h-4 text-white" />
           </div>
-          <p className="text-xs text-slate-500 mt-1 truncate">{userEmail}</p>
+          <span className="font-semibold text-slate-100">RAG Assistant</span>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close sidebar"
+            className="ml-auto btn-ghost !p-2 md:hidden"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
+        <p className="text-xs text-slate-500 mt-1 truncate">{userEmail}</p>
+      </div>
 
-        <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
-          <button
-            onClick={() => setView("upload")}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-              view === "upload"
-                ? "bg-brand-600/20 text-brand-300 border border-brand-500/30"
-                : "text-slate-400 hover:text-slate-200 hover:bg-surface-hover"
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            Documents
-            <span className="ml-auto text-xs bg-surface text-slate-400 px-2 py-0.5 rounded-full">
-              {documents.length}
-            </span>
-          </button>
+      <nav className="p-4 space-y-1 flex-1 overflow-y-auto" aria-label="Main navigation">
+        <button
+          type="button"
+          onClick={() => { setView("upload"); setSidebarOpen(false); }}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+            view === "upload"
+              ? "bg-brand-600/20 text-brand-300 border border-brand-500/30"
+              : "text-slate-400 hover:text-slate-200 hover:bg-surface-hover"
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          Documents
+          <span className="ml-auto text-xs bg-surface text-slate-400 px-2 py-0.5 rounded-full">
+            {documents.length}
+          </span>
+        </button>
 
-          <button
-            onClick={() => { setView("chat"); setActiveConvId(null); }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-              view === "chat" && !activeConvId
-                ? "bg-brand-600/20 text-brand-300 border border-brand-500/30"
-                : "text-slate-400 hover:text-slate-200 hover:bg-surface-hover"
-            }`}
-          >
-            <Plus className="w-4 h-4" />
-            New chat
-          </button>
+        <button
+          type="button"
+          onClick={() => { setView("chat"); setActiveConvId(null); setSidebarOpen(false); }}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+            view === "chat" && !activeConvId
+              ? "bg-brand-600/20 text-brand-300 border border-brand-500/30"
+              : "text-slate-400 hover:text-slate-200 hover:bg-surface-hover"
+          }`}
+        >
+          <Plus className="w-4 h-4" />
+          New chat
+        </button>
 
-          {conversations.length > 0 && (
-            <div className="pt-4">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
-                Recent chats
-              </p>
-              {conversations.slice(0, 15).map((conv) => (
+        <div className="pt-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
+            Recent chats
+          </p>
+          {convsError ? (
+            <div className="px-3 py-2 text-sm text-red-300" role="alert">
+              <p>Could not load conversations: {convsError}</p>
+              <button type="button" onClick={() => void fetchConvs()} className="btn-ghost text-xs mt-2">
+                <RotateCcw className="w-3 h-3" /> Retry
+              </button>
+            </div>
+          ) : conversations.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-slate-500">No conversations yet — start a new chat.</p>
+          ) : (
+            <>
+              {conversations.slice(0, visibleConvCount).map((conv) => (
                 <div
                   key={conv.id}
-                  onClick={() => { setActiveConvId(conv.id); setView("chat"); }}
+                  onClick={() => { setActiveConvId(conv.id); setView("chat"); setSidebarOpen(false); }}
                   className={`group w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-sm transition-all text-left cursor-pointer ${
                     activeConvId === conv.id
                       ? "bg-brand-600/20 text-brand-300 border border-brand-500/30"
                       : "text-slate-400 hover:text-slate-200 hover:bg-surface-hover"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 truncate">
-                    <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                    <span className="truncate">{conv.title}</span>
-                  </div>
-                  <button
-                    onClick={(e) => deleteConversation(e, conv.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity text-slate-500"
-                    title="Delete conversation"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {renamingId === conv.id ? (
+                    <span className="flex items-center gap-2 w-full" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        autoFocus
+                        aria-label={`Rename conversation ${conv.title}`}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void saveRename(conv.id);
+                          if (e.key === "Escape") setRenamingId(null);
+                        }}
+                        className="input !py-1.5 !px-2 text-sm flex-1 min-w-0"
+                      />
+                      <button type="button" onClick={() => void saveRename(conv.id)} aria-label="Save new title" className="btn-ghost !p-1.5 text-xs">Save</button>
+                      <button type="button" onClick={() => setRenamingId(null)} aria-label="Cancel rename" className="btn-ghost !p-1.5 text-xs">Cancel</button>
+                    </span>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2.5 truncate">
+                        <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                        <span className="truncate">{conv.title}</span>
+                      </div>
+                      <span className="flex gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setRenamingId(conv.id); setRenameValue(conv.title); }}
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 hover:text-brand-300 transition-opacity text-slate-500"
+                          aria-label={`Rename conversation ${conv.title}`}
+                          title="Rename conversation"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => deleteConversation(e, conv.id)}
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 hover:text-red-400 transition-opacity text-slate-500"
+                          aria-label={`Delete conversation ${conv.title}`}
+                          title="Delete conversation"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    </>
+                  )}
                 </div>
               ))}
-            </div>
+              {visibleConvCount < conversations.length && (
+                <button type="button" onClick={() => setVisibleConvCount((n) => n + 15)} className="btn-ghost text-xs w-full justify-center mt-2">
+                  Load more chats ({conversations.length - visibleConvCount} remaining)
+                </button>
+              )}
+            </>
           )}
-        </nav>
-
-        <div className="p-4 border-t border-surface-border">
-          <button onClick={handleLogout} className="btn-ghost w-full justify-start text-sm">
-            <LogOut className="w-4 h-4" />
-            Sign out
-          </button>
         </div>
+      </nav>
+
+      <div className="p-4 border-t border-surface-border">
+        <button type="button" onClick={handleLogout} className="btn-ghost w-full justify-start text-sm">
+          <LogOut className="w-4 h-4" />
+          Sign out
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="min-h-screen flex">
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex w-72 flex-shrink-0 border-r border-surface-border bg-surface-card flex-col">
+        {sidebar}
       </aside>
 
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      {/* Mobile sidebar: overlay, not a fixed w-72 bar. */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-72 border-r border-surface-border bg-surface-card flex flex-col overflow-y-auto">
+            {sidebar}
+          </aside>
+        </div>
+      )}
+
+      <main className="flex-1 flex flex-col min-h-0 overflow-hidden min-w-0">
+        {/* Mobile top bar */}
+        <div className="md:hidden flex items-center gap-3 px-4 py-3 border-b border-surface-border bg-surface-card">
+          <button type="button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation menu" className="btn-ghost !p-2">
+            <Menu className="w-5 h-5" />
+          </button>
+          <span className="font-semibold text-slate-100 text-sm">RAG Assistant</span>
+        </div>
+
         {view === "upload" ? (
-          <div className="flex-1 overflow-y-auto p-8">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8">
             <div className="max-w-4xl mx-auto">
               <div className="mb-8">
                 <h1 className="text-2xl font-bold text-slate-100">Document Library</h1>
@@ -272,7 +428,7 @@ export default function DashboardPage() {
                     : "border-surface-border hover:border-brand-500/50 hover:bg-surface-hover"
                 }`}
               >
-                <input {...getInputProps()} id="file-upload" />
+                <input {...getInputProps()} id="file-upload" aria-label="Upload a document" />
                 <div className="flex flex-col items-center gap-4">
                   {uploading ? (
                     <>
@@ -302,7 +458,14 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {documents.length === 0 ? (
+              {docsError ? (
+                <div className="card p-6 text-center" role="alert">
+                  <p className="text-red-300">Could not load documents: {docsError}</p>
+                  <button type="button" onClick={() => void fetchDocs()} className="btn-ghost text-sm mt-3">
+                    <RotateCcw className="w-3.5 h-3.5" /> Retry
+                  </button>
+                </div>
+              ) : documents.length === 0 ? (
                 <div className="card p-12 text-center">
                   <FileText className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                   <p className="text-slate-400 text-lg font-medium">No documents yet</p>
@@ -321,20 +484,31 @@ export default function DashboardPage() {
                           {formatBytes(doc.file_size_bytes)} · {doc.chunk_count} chunks ·{" "}
                           {new Date(doc.created_at).toLocaleDateString()}
                         </p>
+                        {isNonTerminal(doc) && (
+                          <div className="mt-2 h-1.5 rounded-full bg-surface overflow-hidden" role="progressbar" aria-valuenow={doc.ingestion_progress ?? 0} aria-valuemin={0} aria-valuemax={100} aria-label={`Ingestion progress for ${doc.original_name}`}>
+                            <div className="h-full bg-brand-500 transition-all" style={{ width: `${doc.ingestion_progress ?? 0}%` }} />
+                          </div>
+                        )}
+                        {doc.status === "error" && doc.error_message && (
+                          <p className="text-xs text-red-300 mt-1" role="alert">{doc.error_message}</p>
+                        )}
                       </div>
                       <div className="flex items-center gap-3">
                         {statusBadge(doc.status)}
                         {doc.status === "ready" && (
                           <button
+                            type="button"
                             onClick={() => { setView("chat"); setActiveConvId(null); }}
-                            className="opacity-0 group-hover:opacity-100 btn-ghost text-xs py-1.5 transition-opacity"
+                            className="opacity-0 group-hover:opacity-100 focus:opacity-100 btn-ghost text-xs py-1.5 transition-opacity"
                           >
                             Ask <ChevronRight className="w-3 h-3" />
                           </button>
                         )}
                         <button
+                          type="button"
                           onClick={() => deleteDocument(doc.id, doc.original_name)}
-                          className="opacity-0 group-hover:opacity-100 btn-danger text-xs py-1.5 transition-opacity"
+                          aria-label={`Delete document ${doc.original_name}`}
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 btn-danger text-xs py-1.5 transition-opacity"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -350,7 +524,7 @@ export default function DashboardPage() {
             conversationId={activeConvId}
             onConversationCreated={(id) => {
               setActiveConvId(id);
-              fetchData();
+              fetchConvs();
             }}
           />
         )}
