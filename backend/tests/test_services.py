@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document
 from app.models.user import User
 from app.services.agent_service import (
+    AgentError,
     AgentService,
+    direct_answer_node,
     planner_node,
     reasoning_node,
     response_node,
@@ -21,8 +23,8 @@ from app.services.agent_service import (
 from app.services.auth_service import AuthService
 from app.services.chunking_service import TextChunk, chunk_text, extract_text, get_tokenizer
 from app.services.document_service import DocumentService
-from app.services.embedding_service import EmbeddingService, get_openai_client
-from app.services.rag_service import RagAnswer, RagService
+from app.services.embedding_service import EmbeddingError, EmbeddingService, get_openai_client
+from app.services.rag_service import RagAnswer, parse_citations
 from app.services.vector_store_service import (
     RetrievedChunk,
     VectorStoreService,
@@ -132,14 +134,14 @@ async def test_embedding_service() -> None:
         assert vectors[0] == [0.1] * 3072
         assert vectors[1] == [0.2] * 3072
 
-    # Fallback on OpenAI error
+    # Phase A: no fallback vectors -- OpenAI failure raises EmbeddingError
+    # (after tenacity retries) instead of returning substitute vectors.
     with patch.object(svc._client.embeddings, "create", new_callable=AsyncMock, side_effect=RuntimeError("API down")):
-        fallback_vec = await svc.embed_text("test fallback")
-        assert len(fallback_vec) == 3072
+        with pytest.raises(EmbeddingError):
+            await svc.embed_text("test fallback")
 
-        fallback_batch = await svc.embed_batch(["fb1", "fb2"])
-        assert len(fallback_batch) == 2
-        assert len(fallback_batch[0]) == 3072
+        with pytest.raises(EmbeddingError):
+            await svc.embed_batch(["fb1", "fb2"])
 
 
 @pytest.mark.asyncio
@@ -251,17 +253,8 @@ async def test_document_service_flow(db_session: AsyncSession, tmp_path) -> None
 
 @pytest.mark.asyncio
 async def test_rag_service() -> None:
-    svc = RagService()
-    owner_id = uuid.uuid4()
-
-    # Empty retrieval
-    with patch.object(svc._vector_svc, "search", new_callable=AsyncMock, return_value=[]):
-        with patch.object(svc, "_embed_svc_class", None):
-            with patch("app.services.embedding_service.EmbeddingService.embed_text", new_callable=AsyncMock, return_value=[0.1]*3072):
-                ans = await svc.answer("Question", owner_id)
-                assert "couldn't find" in ans.answer
-
-    # Retrieval with citations
+    # Phase A: RagService.answer() was deleted (duplicate RAG path); the
+    # module now only provides the citation parser used by the agent.
     mock_chunks = [
         RetrievedChunk(
             text="Antigravity is an IDE.",
@@ -272,24 +265,20 @@ async def test_rag_service() -> None:
         )
     ]
 
-    mock_llm_resp = MagicMock()
-    mock_choice = MagicMock()
-    mock_choice.message.content = "Antigravity is an AI IDE.\n\nCITATIONS:\n[1] guide.txt, chunk 0"
-    mock_llm_resp.choices = [mock_choice]
-
-    with (
-        patch("app.services.embedding_service.EmbeddingService.embed_text", new_callable=AsyncMock, return_value=[0.1]*3072),
-        patch.object(svc._vector_svc, "search", new_callable=AsyncMock, return_value=mock_chunks),
-        patch.object(svc._llm.chat.completions, "create", new_callable=AsyncMock, return_value=mock_llm_resp),
-    ):
-        result = await svc.answer("What is Antigravity?", owner_id, history=[{"role": "user", "content": "hi"}])
-        assert "Antigravity is an AI IDE." in result.answer
-        assert len(result.citations) == 1
-        assert result.citations[0]["document_name"] == "guide.txt"
+    raw, cits = parse_citations(
+        "Antigravity is an AI IDE.\n\nCITATIONS:\n[1] guide.txt, chunk 0", mock_chunks
+    )
+    assert "Antigravity is an AI IDE." in raw
+    assert len(cits) == 1
+    assert cits[0]["document_name"] == "guide.txt"
 
     # Citation parsing without citations block
-    raw, cits = RagService._parse_citations("Plain response without citations", mock_chunks)
+    raw, cits = parse_citations("Plain response without citations", mock_chunks)
     assert raw == "Plain response without citations"
+    assert cits == []
+
+    # Out-of-range citation indices are dropped, not invented.
+    raw, cits = parse_citations("Answer.\n\nCITATIONS:\n[9] nope.txt, chunk 3", mock_chunks)
     assert cits == []
 
 
@@ -363,22 +352,37 @@ async def test_agent_service_nodes() -> None:
     res_empty_chunks = await reasoning_node({**res_retriever, "chunks": []})
     assert "couldn't find" in res_empty_chunks["answer"]
 
-    # Reasoning node error fallback
+    # Phase A: reasoning node no longer hides LLM failures behind a
+    # snippet fallback; it raises AgentError for the router to map to 502.
     with patch("app.services.agent_service.get_openai_client") as mock_get_client:
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("LLM reasoning error"))
         mock_get_client.return_value = mock_client
 
-        res_reasoning_err = await reasoning_node(res_retriever)
-        assert "Based on your uploaded documents" in res_reasoning_err["answer"]
+        with pytest.raises(AgentError):
+            await reasoning_node(res_retriever)
 
     # Response node
     res_response = await response_node(res_reasoning)
     assert len(res_response["citations"]) == 1
 
-    # Routing condition
+    # Routing condition (Phase A: skip now goes to the direct-answer node,
+    # not to reasoning with empty chunks)
     assert should_retrieve({"needs_retrieval": True}) == "retriever"
-    assert should_retrieve({"needs_retrieval": False}) == "reasoning"
+    assert should_retrieve({"needs_retrieval": False}) == "direct"
+
+    # Direct-answer node answers without documents or citations.
+    mock_direct_resp = MagicMock()
+    mock_direct_choice = MagicMock()
+    mock_direct_choice.message.content = "Hello! How can I help?"
+    mock_direct_resp.choices = [mock_direct_choice]
+    with patch("app.services.agent_service.get_openai_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_direct_resp)
+        mock_get_client.return_value = mock_client
+        res_direct = await direct_answer_node({**res_retriever, "chunks": []})
+        assert "Hello!" in res_direct["answer"]
+        assert res_direct["citations"] == []
 
     # Full AgentService run
     agent = AgentService()
