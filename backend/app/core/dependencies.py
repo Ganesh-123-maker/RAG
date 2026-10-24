@@ -30,12 +30,18 @@ async def get_current_user(
         user_id: str | None = payload.get("sub")
         if user_id is None:
             raise credentials_exception
-    except JWTError:
+        # Parse inside the try: a syntactically valid JWT with a non-UUID
+        # sub previously raised an uncaught ValueError (HTTP 500). It is
+        # an authentication failure, so it must be 401.
+        user_uuid = UUID(user_id)
+    except (JWTError, ValueError, AttributeError):
         raise credentials_exception
 
     repo = UserRepository(db)
-    user = await repo.get_by_id(UUID(user_id))
-    if user is None:
+    user = await repo.get_by_id(user_uuid)
+    if user is None or not user.is_active:
+        # Inactive users authenticate no further; 401 (not 403) so the
+        # client treats it exactly like any other invalid credential.
         raise credentials_exception
     return user
 

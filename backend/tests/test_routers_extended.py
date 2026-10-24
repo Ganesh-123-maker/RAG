@@ -214,31 +214,19 @@ async def test_repositories_complete(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_chat_stream_endpoint(test_client: AsyncClient, db_session: AsyncSession, fake_user: User) -> None:
+    # Phase A: /stream runs the same AgentService as /chat. Patch the
+    # service's run_stream (the graph boundary), not the old inline LLM.
     c_repo = ConversationRepository(db_session)
     existing_conv = await c_repo.create_conversation(fake_user.id, title="Stream Conv")
 
-    mock_chunks = [
-        RetrievedChunk(
-            text="Streaming chunk context",
-            document_id=str(uuid.uuid4()),
-            document_name="stream_doc.txt",
-            chunk_index=0,
-            score=0.97,
-        )
-    ]
+    async def fake_stream(self, **kwargs):
+        yield {"type": "status", "status": "started"}
+        yield {"type": "token", "token": "Hello "}
+        yield {"type": "token", "token": "world!"}
+        yield {"type": "citations", "citations": []}
+        yield {"type": "done", "answer": "Hello world!", "citations": []}
 
-    async def mock_stream():
-        yield MagicMock(choices=[MagicMock(delta=MagicMock(content="Hello "))])
-        yield MagicMock(choices=[MagicMock(delta=MagicMock(content="world!"))])
-
-    mock_llm = MagicMock()
-    mock_llm.chat.completions.create = AsyncMock(return_value=mock_stream())
-
-    with (
-        patch("app.services.embedding_service.EmbeddingService.embed_text", new_callable=AsyncMock, return_value=[0.1]*3072),
-        patch("app.services.vector_store_service.VectorStoreService.search", new_callable=AsyncMock, return_value=mock_chunks),
-        patch("app.services.embedding_service.get_openai_client", return_value=mock_llm),
-    ):
+    with patch("app.routers.chat.AgentService.run_stream", fake_stream):
         # Stream with existing conversation_id
         response = await test_client.post(
             "/api/v1/chat/stream",
@@ -260,36 +248,32 @@ async def test_chat_stream_endpoint(test_client: AsyncClient, db_session: AsyncS
 
 @pytest.mark.asyncio
 async def test_chat_stream_fallback(test_client: AsyncClient) -> None:
-    mock_chunks = [
-        RetrievedChunk(
-            text="Fallback chunk text",
-            document_id=str(uuid.uuid4()),
-            document_name="fallback.txt",
-            chunk_index=0,
-            score=0.95,
-        )
-    ]
+    # Phase A: a stream failure now yields a structured error event, not a
+    # fabricated snippet "answer" followed by done.
+    async def failing_stream(self, **kwargs):
+        yield {"type": "status", "status": "started"}
+        yield {"type": "error", "detail": "Chat service is temporarily unavailable."}
 
-    mock_llm = MagicMock()
-    mock_llm.chat.completions.create = AsyncMock(side_effect=RuntimeError("OpenAI stream down"))
-
-    with (
-        patch("app.services.embedding_service.EmbeddingService.embed_text", new_callable=AsyncMock, return_value=[0.1]*3072),
-        patch("app.services.vector_store_service.VectorStoreService.search", new_callable=AsyncMock, return_value=mock_chunks),
-        patch("app.services.embedding_service.get_openai_client", return_value=mock_llm),
-    ):
+    with patch("app.routers.chat.AgentService.run_stream", failing_stream):
         response = await test_client.post(
             "/api/v1/chat/stream",
             json={"question": "Fallback question"},
         )
         assert response.status_code == 200
-        assert "Based" in response.text
-        assert "done" in response.text
+        assert "error" in response.text
+        assert "Based" not in response.text
 
 
 @pytest.mark.asyncio
 async def test_chat_errors_and_document_id(test_client: AsyncClient, db_session: AsyncSession, fake_user: User) -> None:
-    doc_id = uuid.uuid4()
+    # Phase A: chat's document_id is now ownership- + status-checked, so
+    # the test uses a real ready document owned by the test user; a random
+    # id must 404 instead of silently searching nothing.
+    d_repo = DocumentRepository(db_session)
+    doc = await d_repo.create(owner_id=fake_user.id, filename="d.txt", original_name="d.txt",
+                              file_type="txt", file_size_bytes=100)
+    await d_repo.mark_ready(doc.id, chunk_count=1, owner_id=fake_user.id)
+    doc_id = doc.id
     mock_result = RagAnswer(
         answer="Direct answer with doc.",
         citations=[{"document_id": str(doc_id), "document_name": "d.txt", "chunk_index": 0, "score": 0.9, "snippet": "..."}],
@@ -303,6 +287,13 @@ async def test_chat_errors_and_document_id(test_client: AsyncClient, db_session:
         assert resp.status_code == 201
         assert resp.json()["content"] == "Direct answer with doc."
         assert len(resp.json()["citations"]) == 1
+
+        # Nonexistent document ID -> 404 (Phase A document check)
+        resp_doc404 = await test_client.post(
+            "/api/v1/chat/",
+            json={"question": "Question bad doc", "document_id": str(uuid.uuid4())},
+        )
+        assert resp_doc404.status_code == 404
 
         # Nonexistent conversation ID
         resp_404 = await test_client.post(

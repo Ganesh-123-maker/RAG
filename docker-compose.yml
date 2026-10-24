@@ -44,8 +44,17 @@ services:
       dockerfile: Dockerfile
     container_name: rag_backend
     restart: unless-stopped
-    env_file: .env
+    # Optional: a missing .env must not break `docker compose up` itself.
+    # First-run flow (documented in README/docs): `cp .env.example .env`
+    # and set OPENAI_API_KEY (plus a real JWT_SECRET_KEY for anything
+    # beyond local dev). Shell-exported OPENAI_API_KEY / JWT_SECRET_KEY
+    # also work via the environment block below.
+    env_file:
+      - path: .env
+        required: false
     environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
       POSTGRES_HOST: postgres
       QDRANT_HOST: qdrant
       PYTHONPATH: /app
@@ -66,8 +75,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info"
+    # No command here: the backend image CMD (entrypoint.sh) runs
+    # `alembic upgrade head` then uvicorn, so `docker run` works too.
 
   # ── Next.js Frontend ──────────────────────────────────────────────────────────
   frontend:
@@ -86,6 +95,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
 
 volumes:

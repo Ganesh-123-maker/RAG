@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,12 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION: str = "rag_chunks"
     QDRANT_API_KEY: str | None = None
 
-    JWT_SECRET_KEY: str
+    # No production default: a missing secret in production fails startup.
+    # For local development only, an unset/empty secret falls back to a
+    # well-known dev-only value (see the validator below) so that
+    # `docker compose up` works with only OPENAI_API_KEY set. Never deploy
+    # with ENVIRONMENT=development and the dev secret.
+    JWT_SECRET_KEY: str | None = None
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
@@ -41,6 +46,19 @@ class Settings(BaseSettings):
     CHUNK_SIZE_TOKENS: int = 512
     CHUNK_OVERLAP_TOKENS: int = 64
     RETRIEVAL_TOP_K: int = 5
+
+    @model_validator(mode="after")
+    def _dev_jwt_secret(self) -> "Settings":
+        if self.JWT_SECRET_KEY:
+            return self
+        if (self.ENVIRONMENT or "development").lower() == "production":
+            raise ValueError("JWT_SECRET_KEY must be set in production")
+        logger.warning(
+            "JWT_SECRET_KEY is not set; using a dev-only insecure secret. "
+            "Do not use this configuration outside local development."
+        )
+        self.JWT_SECRET_KEY = "dev-only-insecure-secret-change-me-in-production"
+        return self
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
