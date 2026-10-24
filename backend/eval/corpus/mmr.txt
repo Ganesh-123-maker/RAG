@@ -1,0 +1,40 @@
+Maximal Marginal Relevance for Diverse Retrieval
+
+Dense retrieval ranks chunks by similarity to the query and returns
+the top results. The problem is that the most similar chunks are
+often near-duplicates of each other: several chunks from the same
+paragraph, or several chunks repeating the same sentence with small
+changes. A top-5 list full of near-duplicates wastes slots that could
+have covered different aspects of the question.
+
+Maximal Marginal Relevance, shortened to MMR, fixes this by balancing
+relevance against diversity. MMR builds the final list one chunk at a
+time. At each step it picks the candidate that maximises a combined
+score: lambda times the candidate's relevance score, minus
+one-minus-lambda times the candidate's highest similarity to any
+chunk already selected. The first term rewards relevance; the second
+term penalises redundancy.
+
+The parameter lambda controls the balance. This guide uses a lambda
+value of 0.7, which weights relevance more heavily than diversity:
+a candidate must be substantially redundant before a slightly less
+relevant but different candidate wins. A lambda of 1.0 would ignore
+diversity entirely and reproduce plain similarity ranking, while a
+lambda of 0.0 would ignore relevance and return the most diverse
+set regardless of whether it answers the question.
+
+MMR needs a candidate pool larger than the final list. This guide
+fetches a pool of 20 candidates and selects a final top-k of 5 from
+it. Fetching only 5 candidates and then applying MMR would be
+pointless, because there would be nothing to choose between. The
+pool size is therefore a real parameter, not an implementation
+detail: a larger pool gives diversity more room to work, at the cost
+of more similarity computations.
+
+MMR measures redundancy with cosine similarity between candidate
+vectors. That requires the candidate vectors themselves, not just
+their scores. If a vector store returns scores without vectors, MMR
+cannot measure redundancy and must fall back to plain score order.
+That fallback should be visible in logs, because silently returning
+score order while claiming diversity would mislead anyone tuning the
+lambda parameter.

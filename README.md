@@ -26,7 +26,7 @@
 | **Citation coverage** | Every generated answer includes source chunk reference | **100%** |
 | **LLM output grounding** | Manual testing required with real OpenAI API key | *Requires live API key to measure* |
 
-> **Note on evaluation:** The `scripts/evaluate_rag.py` script measures real JWT auth reliability (50 bcrypt cycles), chunking correctness, and citation plumbing end-to-end. It does **not** call GPT-4o or measure LLM hallucination rates — that requires a live OpenAI API key and out-of-corpus probe questions. For real-world LLM quality testing, upload documents and test queries through the running application.
+> **Note on evaluation (Phase D):** The old simulated `scripts/evaluate_rag.py` was deleted in Phase D. The current runner is `backend/eval/run_eval.py` (see `backend/eval/README.md`): `--mode offline` is a pipeline smoke test only and is NOT a quality measurement; `--mode live` needs a real `OPENAI_API_KEY` and runs the real graph plus an LLM-as-judge. The benchmark table below is the pre-Phase-D simulated table and is superseded by the run outputs under `docs/eval/`; it will be replaced by measured numbers in Phase G.
 
 
 |---|---|---|---|
@@ -207,7 +207,8 @@ python -m pytest tests/ -v --cov=app --cov-report=term-missing
 
 ```bash
 cd backend
-python scripts/evaluate_rag.py
+python eval/run_eval.py --mode offline   # pipeline smoke test only, NOT a quality measurement
+OPENAI_API_KEY=... python eval/run_eval.py --mode live  # real evaluation
 ```
 
 ---

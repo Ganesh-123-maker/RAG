@@ -1,0 +1,48 @@
+{
+  "mode": "offline-pipeline-smoke",
+  "variant": "current-config",
+  "run_id": "offline-smoke-1",
+  "generated_at": "2026-10-24T07:55:19.425149+00:00",
+  "corpus_documents": 10,
+  "corpus_files": [
+    "vector-databases.txt",
+    "qdrant.md",
+    "langgraph.pdf",
+    "chunking.txt",
+    "embeddings.md",
+    "jwt-auth.docx",
+    "docker.txt",
+    "postgres.md",
+    "sse.txt",
+    "mmr.txt"
+  ],
+  "golden_questions": 55,
+  "unanswerable_probes": 16,
+  "injection_probes": 6,
+  "retrieval": {
+    "hit_rate_at_1": 0.3636,
+    "hit_rate_at_3": 0.3636,
+    "hit_rate_at_5": 0.3636,
+    "mrr": 0.3636
+  },
+  "citation_precision_mean": 1.0,
+  "faithfulness_mean": 1.0,
+  "refusal_accuracy": 1.0,
+  "injection_pass_rate": 1.0,
+  "latency_seconds": {
+    "p50": 0.0313,
+    "p95": 0.0468,
+    "mean": 0.0347
+  },
+  "config": {
+    "threshold": null,
+    "no_mmr": false,
+    "chat_model": "gpt-4o",
+    "embedding_model": "text-embedding-3-large"
+  },
+  "pricing_date": null,
+  "estimated_cost_usd_total": 0.0,
+  "notes": "OFFLINE MODE: fake hashed bag-of-words embeddings and a fake LLM that copies the best-overlapping context chunk. These numbers prove the pipeline runs end to end; they are NOT a quality measurement of the real system.",
+  "keyword_score_mean": 0.3636,
+  "judge_correct_rate": null
+}

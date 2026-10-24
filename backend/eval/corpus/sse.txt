@@ -1,0 +1,41 @@
+Server-Sent Events for Streaming
+
+Server-Sent Events, usually shortened to SSE, is a way for a server
+to push a stream of updates to a browser over a single HTTP
+connection. The response has the content type text/event-stream.
+Each event is sent as one or more lines starting with data:, followed
+by a blank line that marks the end of the event. A client reads
+events as they arrive instead of waiting for the whole response.
+
+SSE is one-directional: the server sends, the client receives. A
+browser client uses the EventSource API, which only supports GET
+requests. An application that needs to send a request body, for
+example a chat question, cannot use EventSource directly; it must use
+fetch with a readable stream and parse the event lines itself. That
+is a common source of confusion when adding streaming to an existing
+API.
+
+Events can carry fields beyond data. An id field lets the client
+resume after a disconnect by sending the last received id. A retry
+field tells the client how long to wait before reconnecting; this
+guide uses a retry value of 3000 milliseconds. An event field names
+the event type, so one stream can carry different kinds of events,
+such as token events, status events, citation events, and a final
+done event. Clients should ignore event types they do not recognise,
+so new event types can be added without breaking old clients.
+
+Streaming needs care around failures. If the server fails halfway
+through a stream, it should send an error event if the connection is
+still open, rather than silently closing the stream and leaving the
+client showing a partial answer as if it were complete. On the
+client, a partial answer that was already displayed should not be
+discarded silently on error; the interface should show that the
+answer is incomplete. A heartbeat, sent every 15 seconds in this
+guide, keeps intermediaries from closing an idle connection during a
+long generation.
+
+SSE is simpler than WebSockets when only server-to-client streaming
+is needed, because it works over plain HTTP and reconnects
+automatically. It is the wrong tool when the client must also stream
+data to the server continuously, or when binary framing is required;
+in those cases WebSockets or a streaming RPC protocol fit better.
