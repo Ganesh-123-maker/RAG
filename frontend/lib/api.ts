@@ -36,6 +36,9 @@ export interface Citation {
   chunk_index: number;
   score: number;
   snippet: string;
+  chunk_id?: string;
+  page?: number | null;
+  section?: string | null;
 }
 
 export interface Message {

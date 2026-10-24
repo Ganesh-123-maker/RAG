@@ -8,6 +8,14 @@ deleted. There is exactly one RAG orchestration path now, in
 agent still needs: the ``RagAnswer`` value type and the ``CITATIONS:``
 parser, so citation semantics are identical for the streaming and
 non-streaming endpoints.
+
+Phase B note: citations are validated by chunk *id*, not by position.
+The model is instructed to cite the ``id`` shown in each ``<context>``
+block. The parser looks that id up among the chunks that were actually
+retrieved; an unknown id is dropped, never substituted with a different
+chunk. This closes the Phase A positional-substitution hole, where a
+model's ``[2]`` could silently be rewritten to whatever chunk happened
+to be second in retrieval order.
 """
 
 import re
@@ -23,13 +31,17 @@ class RagAnswer:
 
 
 def parse_citations(raw: str, chunks: list[RetrievedChunk]) -> tuple[str, list[dict]]:
-    """Parse a ``CITATIONS:`` block out of a model answer.
+    """Parse a ``CITATIONS:`` block, validating ids against retrieval.
 
-    Only the positional index from each citation line is trusted, and it is
-    bounds-checked against the chunks that were actually retrieved: the
-    returned citation always describes a real retrieved chunk (its document
-    id/name, chunk index, score and snippet), never a document the model
-    merely named. Lines that are malformed or out of range are dropped.
+    Accepted line format (from the Phase B prompt)::
+
+        [chunk-id] document_name, chunk N
+
+    Only the bracketed id is trusted, and only as a lookup key: if it
+    matches a retrieved chunk's ``chunk_id`` (or its ``document_id`` /
+    ``chunk_index`` fallback id), that real chunk is cited. Unknown ids,
+    malformed lines, and the old positional format (``[1]`` with no
+    matching chunk id) are dropped. Duplicate ids are deduplicated.
     If there is no ``CITATIONS:`` block, the answer is returned with no
     citations rather than invented ones.
     """
@@ -39,28 +51,36 @@ def parse_citations(raw: str, chunks: list[RetrievedChunk]) -> tuple[str, list[d
         return raw.strip(), []
 
     answer_text = answer_part.strip()
+    by_id = {c.chunk_id: c for c in chunks}
     citations: list[dict] = []
+    seen: set[str] = set()
 
     for line in citation_part.strip().splitlines():
         line = line.strip()
         if not line:
             continue
-        m = re.match(r"\[(\d+)\]\s+(.+?),\s+chunk\s+(\d+)", line)
-        if m:
-            idx = int(m.group(1)) - 1
-            if 0 <= idx < len(chunks):
-                chunk = chunks[idx]
-                citations.append(
-                    {
-                        "document_id": chunk.document_id,
-                        "document_name": chunk.document_name,
-                        "chunk_index": chunk.chunk_index,
-                        "score": round(chunk.score, 4),
-                        "snippet": chunk.text[:200] + "..."
-                        if len(chunk.text) > 200
-                        else chunk.text,
-                    }
-                )
+        m = re.match(r"\[([^\]]+)\]\s+(.+?),\s+chunk\s+(\d+)", line)
+        if not m:
+            continue
+        cited_id = m.group(1).strip()
+        chunk = by_id.get(cited_id)
+        if chunk is None or chunk.chunk_id in seen:
+            continue
+        seen.add(chunk.chunk_id)
+        citations.append(
+            {
+                "chunk_id": chunk.chunk_id,
+                "document_id": chunk.document_id,
+                "document_name": chunk.document_name,
+                "chunk_index": chunk.chunk_index,
+                "page": chunk.page,
+                "section": chunk.section,
+                "score": round(chunk.score, 4),
+                "snippet": chunk.text[:200] + "..."
+                if len(chunk.text) > 200
+                else chunk.text,
+            }
+        )
 
     return answer_text, citations
 

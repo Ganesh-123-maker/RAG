@@ -265,20 +265,29 @@ async def test_rag_service() -> None:
         )
     ]
 
+    # Phase B: citations are validated by chunk id, not position.
+    chunk_id = mock_chunks[0].chunk_id
     raw, cits = parse_citations(
-        "Antigravity is an AI IDE.\n\nCITATIONS:\n[1] guide.txt, chunk 0", mock_chunks
+        f"Antigravity is an AI IDE.\n\nCITATIONS:\n[{chunk_id}] guide.txt, chunk 0",
+        mock_chunks,
     )
     assert "Antigravity is an AI IDE." in raw
     assert len(cits) == 1
     assert cits[0]["document_name"] == "guide.txt"
+    assert cits[0]["chunk_id"] == chunk_id
 
     # Citation parsing without citations block
     raw, cits = parse_citations("Plain response without citations", mock_chunks)
     assert raw == "Plain response without citations"
     assert cits == []
 
-    # Out-of-range citation indices are dropped, not invented.
+    # Unknown ids -- including the old positional format -- are dropped,
+    # never substituted with a different retrieved chunk.
     raw, cits = parse_citations("Answer.\n\nCITATIONS:\n[9] nope.txt, chunk 3", mock_chunks)
+    assert cits == []
+    raw, cits = parse_citations(
+        "Answer.\n\nCITATIONS:\n[1] guide.txt, chunk 0", mock_chunks
+    )
     assert cits == []
 
 
@@ -337,7 +346,11 @@ async def test_agent_service_nodes() -> None:
     # Reasoning node normal
     mock_reasoning_resp = MagicMock()
     mock_r_choice = MagicMock()
-    mock_r_choice.message.content = "Python is a language.\n\nCITATIONS:\n[1] doc.txt, chunk 0"
+    # Phase B: citations are by chunk id, not position. The mocked chunk's
+    # default id is f"{document_id}:{chunk_index}".
+    mock_r_choice.message.content = (
+        f"Python is a language.\n\nCITATIONS:\n[{doc_id}:0] doc.txt, chunk 0"
+    )
     mock_reasoning_resp.choices = [mock_r_choice]
 
     with patch("app.services.agent_service.get_openai_client") as mock_get_client:

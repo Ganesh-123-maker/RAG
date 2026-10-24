@@ -46,6 +46,36 @@ class Settings(BaseSettings):
     CHUNK_SIZE_TOKENS: int = 512
     CHUNK_OVERLAP_TOKENS: int = 64
     RETRIEVAL_TOP_K: int = 5
+    # Phase B retrieval: fetch a wider candidate pool, filter by cosine
+    # similarity, then select a diverse final set with MMR.
+    # Threshold default 0.30: for text-embedding-3-large, cosine scores
+    # below ~0.3 are typically off-topic in practice. This is a sensible
+    # starting default, NOT a measured optimum -- Phase D must measure
+    # hit-rate/recall at several thresholds before claiming it is tuned.
+    RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.30
+    RETRIEVAL_FETCH_K: int = 20
+    MMR_LAMBDA: float = 0.7
+    # Generation budgets (Phase B): context is truncated lowest-score
+    # first when it would exceed this; history is truncated most-recent
+    # first; chat completions are capped at CHAT_MAX_TOKENS.
+    MAX_CONTEXT_TOKENS: int = 6000
+    HISTORY_MAX_TOKENS: int = 2000
+    CHAT_MAX_TOKENS: int = 1000
+
+    @field_validator("OPENAI_EMBEDDING_DIMENSIONS")
+    @classmethod
+    def _validate_dims(cls, v: int) -> int:
+        # text-embedding-3-large supports 1..3072 via `dimensions`.
+        if not 1 <= v <= 3072:
+            raise ValueError("OPENAI_EMBEDDING_DIMENSIONS must be in 1..3072")
+        return v
+
+    @field_validator("RETRIEVAL_SIMILARITY_THRESHOLD", "MMR_LAMBDA")
+    @classmethod
+    def _validate_unit(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("value must be in 0..1")
+        return v
 
     @model_validator(mode="after")
     def _dev_jwt_secret(self) -> "Settings":
@@ -67,6 +97,7 @@ class Settings(BaseSettings):
             v_stripped = v.strip()
             if v_stripped.startswith("[") and v_stripped.endswith("]"):
                 import json
+
                 try:
                     return json.loads(v_stripped)
                 except Exception:
