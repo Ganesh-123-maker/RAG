@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
     OPENAI_EMBEDDING_DIMENSIONS: int = 3072
     OPENAI_CHAT_MODEL: str = "gpt-4o"
+    # Optional OpenAI-compatible endpoint override. Unset (default) means
+    # the real OpenAI API. Set to a provider's OpenAI-compatible base URL
+    # (e.g. Gemini's https://generativelanguage.googleapis.com/v1beta/openai/)
+    # to run the same code against that provider, with its own key in
+    # OPENAI_API_KEY and its own model names in the settings above.
+    # This is how the live evaluation runs on Gemini's free tier; the
+    # production default is unchanged.
+    LLM_BASE_URL: str | None = None
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./ragdb.sqlite"
     POSTGRES_HOST: str = "postgres"

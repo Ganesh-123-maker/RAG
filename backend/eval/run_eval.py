@@ -323,11 +323,16 @@ async def run_evaluation(cfg: dict) -> dict:
                     "input": in_tokens,
                     "output": out_tokens,
                 }
-                record["estimated_cost_usd"] = round(
-                    in_tokens * PRICING["gpt-4o-input"] / 1_000_000
-                    + out_tokens * PRICING["gpt-4o-output"] / 1_000_000,
-                    6,
-                )
+                # Gemini free tier via its OpenAI-compatible endpoint costs
+                # $0; the gpt-4o pricing constants do not apply to it.
+                if "generativelanguage" in os.environ.get("LLM_BASE_URL", ""):
+                    record["estimated_cost_usd"] = 0.0
+                else:
+                    record["estimated_cost_usd"] = round(
+                        in_tokens * PRICING["gpt-4o-input"] / 1_000_000
+                        + out_tokens * PRICING["gpt-4o-output"] / 1_000_000,
+                        6,
+                    )
             else:
                 record["judge"] = None
                 record["keyword_score"] = _metrics.keyword_score(
@@ -388,6 +393,11 @@ async def run_evaluation(cfg: dict) -> dict:
     ]
     summary: dict = {
         "mode": mode_label,
+        "provider": (
+            "gemini-openai-compat"
+            if "generativelanguage" in os.environ.get("LLM_BASE_URL", "")
+            else "openai"
+        ),
         "variant": cfg.get("variant", "current-config"),
         "run_id": cfg["run_id"],
         "generated_at": datetime.now(UTC).isoformat(),
@@ -481,10 +491,19 @@ async def run_evaluation(cfg: dict) -> dict:
             "numbers prove the pipeline runs end to end; they are NOT a "
             "quality measurement of the real system."
             if mode == "offline"
-            else "LIVE MODE: real OpenAI embeddings, real graph LLM calls, "
-            "and LLM-as-judge at temperature 0 with a fixed rubric. "
-            "Token/cost figures are tiktoken-based estimates, not metered "
-            "API usage (the agent service does not return usage)."
+            else (
+                "LIVE MODE (Gemini free tier via its OpenAI-compatible "
+                "endpoint): real Gemini embeddings, real graph LLM calls, "
+                "and LLM-as-judge at temperature 0 with a fixed rubric. "
+                "Cost is $0 on the free tier, subject to its rate limits. "
+                "These numbers measure the Gemini configuration, NOT "
+                "OpenAI/gpt-4o, and must never be presented as OpenAI results."
+                if "generativelanguage" in os.environ.get("LLM_BASE_URL", "")
+                else "LIVE MODE: real OpenAI embeddings, real graph LLM calls, "
+                "and LLM-as-judge at temperature 0 with a fixed rubric. "
+                "Token/cost figures are tiktoken-based estimates, not metered "
+                "API usage (the agent service does not return usage)."
+            )
         ),
     }
     if mode == "live":
@@ -538,7 +557,8 @@ def main(argv: list[str] | None = None) -> int:
         "--mode",
         choices=["offline", "live"],
         required=True,
-        help="offline = pipeline smoke test only; live = real OpenAI calls",
+        help="offline = pipeline smoke test only; live = real provider calls "
+        "(OpenAI by default, or the LLM_BASE_URL provider, e.g. Gemini)",
     )
     parser.add_argument(
         "--limit",

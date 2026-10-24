@@ -29,6 +29,7 @@ def get_openai_client() -> AsyncOpenAI:
     if _client is None:
         _client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
+            base_url=settings.LLM_BASE_URL,
             timeout=OPENAI_TIMEOUT_SECONDS,
             max_retries=0,
         )
