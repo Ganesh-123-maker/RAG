@@ -2,8 +2,26 @@ from __future__ import annotations
 
 """One LangGraph RAG orchestration path, shared by both chat endpoints.
 
-Graph: planner -> retriever -> reasoning -> response, or
-planner -> direct_answer -> response when no retrieval is needed.
+Phase C graph: planner -> retriever -> grade_retrieval
+  -> [rewrite -> retriever -> grade_retrieval, at most ONE retry]
+  -> reasoning -> verify
+  -> [reasoning again, at most ONE regeneration]
+  -> response,
+or planner -> direct_answer -> response when no retrieval is needed.
+
+Grading is score-based by default (no extra LLM call): a retrieval is
+"good" only if at least one chunk was returned and its top score meets
+``RETRIEVAL_GRADE_THRESHOLD``. Verification is a deterministic
+keyword/token-overlap check (see ``verify_node``) -- it is deliberately
+NOT claimed to be LLM verification, and its limits are documented in
+``docs/phase-c-report.md``.
+
+Both ``AgentService.run()`` (non-streaming) and ``AgentService.run_stream()``
+(streaming) execute this same graph with the same planner, retrieval,
+prompts and citation parsing. The only difference is how the reasoning
+node's output is delivered: ``run_stream()`` passes a token sink through
+graph state so the reasoning node's tokens are yielded as SSE events while
+the graph runs; ``run()`` collects the final state instead.
 
 Both ``AgentService.run()`` (non-streaming) and ``AgentService.run_stream()``
 (streaming) execute this same graph with the same planner, retrieval,
@@ -66,6 +84,84 @@ HISTORY_FOR_PLANNER = 4
 HISTORY_FOR_REASONING = 10
 HISTORY_TRUNC_CHARS = 200
 
+# Phase C bounded loops. These are hard caps, not suggestions: the graph
+# can retry retrieval at most once and regenerate after a failed
+# verification at most once, so it always terminates.
+MAX_RETRIEVAL_RETRIES = 1
+MAX_VERIFY_REGENERATIONS = 1
+
+REFUSAL_TEXT = "I couldn't find relevant information in your documents."
+
+# Small stopword set for the verify overlap check. The check is coarse
+# by design (see verify_node): it catches answers with no substantive
+# connection to their cited chunks, not subtle hallucinations.
+_VERIFY_STOPWORDS = {
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "of",
+    "to",
+    "in",
+    "on",
+    "for",
+    "with",
+    "by",
+    "at",
+    "from",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "as",
+    "what",
+    "which",
+    "who",
+    "when",
+    "where",
+    "how",
+    "why",
+    "do",
+    "does",
+    "did",
+    "can",
+    "could",
+    "should",
+    "would",
+    "will",
+    "shall",
+    "may",
+    "might",
+    "i",
+    "you",
+    "he",
+    "she",
+    "we",
+    "they",
+    "his",
+    "her",
+    "their",
+    "our",
+    "not",
+    "no",
+    "yes",
+    "if",
+    "then",
+    "than",
+    "so",
+    "such",
+}
+
 
 class AgentError(Exception):
     """A failure inside the agent graph (LLM / retrieval) after retries."""
@@ -86,8 +182,20 @@ class AgentState(TypedDict):
     answer: str
     citations: list[dict]
     needs_retrieval: bool
-    # Optional token sink used only by run_stream(); absent for run().
+    # Phase C fields. ``errors`` records only recoverable problems
+    # (e.g. a rewrite fallback, a failed verification); fatal LLM /
+    # retrieval failures raise AgentError instead, so they cannot be
+    # mistaken for a successful answer.
+    errors: list[str]
+    retries: int  # retrieval retries used (cap: MAX_RETRIEVAL_RETRIES)
+    retrieval_grade: str  # "", "good", or "poor"
+    grade_reason: str
+    verify_result: str  # "", "pass", "fail", or "skipped"
+    verify_attempts: int  # verifications that failed (cap below)
+    strict_reasoning: bool  # True when reasoning runs after a verify fail
+    # Optional sinks used only by run_stream(); absent for run().
     stream_sink: NotRequired[Callable[[str], None] | None]
+    status_sink: NotRequired[Callable[[str], None] | None]
 
 
 def _fail_open_plan(question: str) -> dict:
@@ -149,20 +257,31 @@ async def retriever_node(state: AgentState) -> dict:
     embed_svc = EmbeddingService()
     vector_svc = VectorStoreService()
 
-    query_vector = await embed_svc.embed_text(state["retrieval_query"])
-    doc_id = uuid.UUID(state["document_id"]) if state.get("document_id") else None
-
+    try:
+        query_vector = await embed_svc.embed_text(state["retrieval_query"])
+        doc_id = uuid.UUID(state["document_id"]) if state.get("document_id") else None
+    except Exception as exc:
+        # No silent fallback: a retrieval failure is a typed error the
+        # router maps to 502 / a stream error event, never an answer
+        # built from no evidence.
+        logger.error("Retrieval failed: %s", exc)
+        raise AgentError("Chat service is temporarily unavailable.") from exc
+    try:
+        chunks_result = await vector_svc.search(
+            query_vector=query_vector,
+            owner_id=uuid.UUID(state["owner_id"]),
+            document_id=doc_id,
+            query_text=state["retrieval_query"],
+        )
+    except Exception as exc:
+        logger.error("Retrieval failed: %s", exc)
+        raise AgentError("Chat service is temporarily unavailable.") from exc
     # VectorStoreService.search applies the configured similarity
     # threshold, fetches a wider pool, and MMR-selects the final top-k.
     # An empty result here is the shared low-confidence path: the
     # reasoning node refuses rather than answering from pretraining, and
     # both chat endpoints share this graph, so they refuse identically.
-    chunks: list[RetrievedChunk] = await vector_svc.search(
-        query_vector=query_vector,
-        owner_id=uuid.UUID(state["owner_id"]),
-        document_id=doc_id,
-        query_text=state["retrieval_query"],
-    )
+    chunks: list[RetrievedChunk] = chunks_result
     logger.debug(
         "Retrieved %d chunks for query: %s", len(chunks), state["retrieval_query"][:60]
     )
@@ -182,6 +301,201 @@ async def retriever_node(state: AgentState) -> dict:
             }
             for c in chunks
         ],
+    }
+
+
+def _emit_status(state: AgentState, status: str) -> None:
+    """Best-effort status sink for streaming; a no-op for run()."""
+    sink = state.get("status_sink")
+    if sink is not None:
+        try:
+            sink(status)
+        except Exception:  # status display must never break the graph
+            logger.debug("Status sink failed", exc_info=True)
+
+
+async def grade_retrieval_node(state: AgentState) -> dict:
+    """Score-based retrieval grade (deterministic, no LLM call).
+
+    "good" requires at least one chunk and a top score at or above
+    ``RETRIEVAL_GRADE_THRESHOLD``. Search already drops chunks below
+    ``RETRIEVAL_SIMILARITY_THRESHOLD`` (0.30), so the grade threshold
+    (0.50 by default) is the stricter bar that decides whether a rewrite
+    is worth one retry: 0.30-0.50 retrievals are weak-but-not-empty and
+    trigger exactly one rewrite. Both thresholds are unmeasured starting
+    points -- Phase D must measure them (see docs/phase-c-report.md).
+    No LLM relevance grading is used: it would add cost, latency, and
+    a non-deterministic grade that graph tests could not pin down.
+    """
+    _emit_status(state, "grading")
+    chunks = state.get("chunks") or []
+    threshold = settings.RETRIEVAL_GRADE_THRESHOLD
+    if not chunks:
+        return {
+            **state,
+            "retrieval_grade": "poor",
+            "grade_reason": "no chunks retrieved",
+        }
+    top = max(float(c.get("score", 0.0)) for c in chunks)
+    if top < threshold:
+        return {
+            **state,
+            "retrieval_grade": "poor",
+            "grade_reason": f"top score {top:.3f} below grade threshold {threshold:.2f}",
+        }
+    return {
+        **state,
+        "retrieval_grade": "good",
+        "grade_reason": f"top score {top:.3f} meets grade threshold {threshold:.2f}",
+    }
+
+
+async def rewrite_query_node(state: AgentState) -> dict:
+    """Rewrite the retrieval query once, reusing planner machinery.
+
+    The rewrite is a single LLM JSON call with the planner system prompt;
+    on any failure it falls back to the previous retrieval query and
+    records the failure in ``errors`` (never a silent change of query).
+    The retry counter is incremented here, so the grade conditional can
+    never route back here a second time.
+    """
+    _emit_status(state, "rewriting")
+    errors = list(state.get("errors") or [])
+    previous = state.get("retrieval_query") or state["question"]
+    user_prompt = (
+        f"Original question: {state['question']}\n"
+        f"Previous retrieval query: {previous}\n"
+        f"Retrieval grade: {state.get('retrieval_grade', '')} "
+        f"({state.get('grade_reason', '')})\n\n"
+        "Write a DIFFERENT self-contained retrieval query for the same "
+        "question, using different keywords or phrasing, so a second "
+        "search may find chunks the first search missed.\n\n"
+        'Respond in JSON exactly:\n{"retrieval_query": "..."}'
+    )
+    try:
+        llm: AsyncOpenAI = get_openai_client()
+        response = await llm.chat.completions.create(
+            model=settings.OPENAI_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        plan = PlannerPlan.model_validate_json(
+            response.choices[0].message.content or "{}"
+        )
+        new_query = plan.retrieval_query.strip() or previous
+    except Exception as exc:  # noqa: BLE001 -- rewrite failure must not abort the run
+        logger.warning("Query rewrite failed, reusing previous query: %s", exc)
+        errors.append("query rewrite failed; reused previous retrieval query")
+        new_query = previous
+    return {
+        **state,
+        "retrieval_query": new_query,
+        "retries": int(state.get("retries") or 0) + 1,
+        "errors": errors,
+    }
+
+
+def _verify_tokens(text: str) -> set[str]:
+    import re
+
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return {t for t in tokens if t not in _VERIFY_STOPWORDS and len(t) > 1}
+
+
+def _verify_support(answer: str, chunks: list[dict]) -> tuple[bool, str]:
+    """Deterministic support check for a reasoning answer.
+
+    Primary mechanism is keyword/token overlap -- chosen over an
+    LLM-as-verifier because it is deterministic, free, and testable
+    with a fake LLM. Its limits are stated honestly in the Phase C
+    report: one shared substantive token passes, so it catches invented
+    citations and wholly unrelated answers, NOT subtle hallucinations
+    or misattributed-but-overlapping claims.
+    """
+    if not chunks:
+        return False, "no chunks to verify against"
+    if answer.strip() == REFUSAL_TEXT:
+        return True, "refusal needs no verification"
+    parsed_answer, citations = parse_citations(
+        answer,
+        [
+            RetrievedChunk(
+                text=c["text"],
+                document_id=c["document_id"],
+                document_name=c["document_name"],
+                chunk_index=c["chunk_index"],
+                score=c["score"],
+                chunk_id=c.get("chunk_id", ""),
+                page=c.get("page"),
+                section=c.get("section"),
+            )
+            for c in chunks
+        ],
+    )
+    if "CITATIONS:" in answer and not citations:
+        return False, "cited chunk ids did not match any retrieved chunk"
+    if not citations:
+        return False, "answer has no valid citations"
+    cited_texts = []
+    by_id = {c.get("chunk_id", ""): c for c in chunks}
+    for cit in citations:
+        chunk = by_id.get(cit["chunk_id"])
+        if chunk is not None:
+            cited_texts.append(chunk["text"])
+    answer_tokens = _verify_tokens(parsed_answer)
+    chunk_tokens: set[str] = set()
+    for text in cited_texts:
+        chunk_tokens |= _verify_tokens(text)
+    if not answer_tokens:
+        return False, "answer body has no substantive tokens"
+    if answer_tokens & chunk_tokens:
+        return True, "answer shares substantive tokens with cited chunks"
+    return False, "no substantive token overlap with cited chunks"
+
+
+async def verify_node(state: AgentState) -> dict:
+    """Verify the reasoning answer against its cited chunks.
+
+    Skipped (not failed) for direct answers and for the shared refusal:
+    neither makes document claims. On failure, the first failure sets
+    ``strict_reasoning`` so the conditional edge can regenerate once;
+    a second failure replaces the answer with the shared refusal.
+    """
+    _emit_status(state, "verifying")
+    if not state.get("chunks"):
+        return {**state, "verify_result": "skipped"}
+    if state["answer"].strip() == REFUSAL_TEXT:
+        return {**state, "verify_result": "skipped"}
+    passed, reason = _verify_support(state["answer"], state["chunks"])
+    errors = list(state.get("errors") or [])
+    if passed:
+        return {
+            **state,
+            "verify_result": "pass",
+            "grade_reason": state.get("grade_reason", ""),
+        }
+    attempts = int(state.get("verify_attempts") or 0) + 1
+    errors.append(f"verification failed (attempt {attempts}): {reason}")
+    if attempts <= MAX_VERIFY_REGENERATIONS:
+        return {
+            **state,
+            "verify_result": "fail",
+            "verify_attempts": attempts,
+            "strict_reasoning": True,
+            "errors": errors,
+        }
+    return {
+        **state,
+        "verify_result": "fail",
+        "verify_attempts": attempts,
+        "strict_reasoning": False,
+        "answer": REFUSAL_TEXT,
+        "citations": [],
+        "errors": errors,
     }
 
 
@@ -271,11 +585,26 @@ async def reasoning_node(state: AgentState) -> dict:
     if not chunks:
         return {
             **state,
-            "answer": "I couldn't find relevant information in your documents.",
+            "answer": REFUSAL_TEXT,
             "citations": [],
+            "verify_result": "skipped",
         }
 
     messages = _reasoning_messages(state)
+    if state.get("strict_reasoning"):
+        # Regeneration after a failed verification: tighten the
+        # instruction instead of silently re-running the same prompt.
+        messages = [
+            {
+                "role": "system",
+                "content": messages[0]["content"]
+                + " Your previous answer failed verification against its "
+                "cited chunks. Answer ONLY from the context blocks, cite "
+                "only chunks you actually used, and if the context does "
+                "not support an answer, refuse instead of guessing.",
+            },
+            *messages[1:],
+        ]
     sink = state.get("stream_sink")
     try:
         if sink is not None:
@@ -339,6 +668,7 @@ async def direct_answer_node(state: AgentState) -> dict:
             **state,
             "answer": response.choices[0].message.content or "",
             "citations": [],
+            "verify_result": "skipped",
         }
     except Exception as exc:  # noqa: BLE001 -- any LLM failure -> honest apology, not a crash
         logger.error("Direct-answer LLM call failed: %s", exc)
@@ -346,6 +676,7 @@ async def direct_answer_node(state: AgentState) -> dict:
             **state,
             "answer": "Sorry, I couldn't answer that right now. Please try again.",
             "citations": [],
+            "verify_result": "skipped",
         }
 
 
@@ -376,11 +707,44 @@ def should_retrieve(state: AgentState) -> str:
 should_route = should_retrieve
 
 
+def should_retry(state: AgentState) -> str:
+    """Grade routing: rewrite once on a poor grade, then proceed.
+
+    The ``retries`` cap is the termination guarantee: after one rewrite
+    + re-retrieval + re-grade, this returns 'reasoning' even if the
+    grade is still poor, and reasoning refuses on empty chunks.
+    """
+    if (
+        state.get("retrieval_grade") == "poor"
+        and int(state.get("retries") or 0) < MAX_RETRIEVAL_RETRIES
+    ):
+        return "rewrite"
+    return "reasoning"
+
+
+def should_regenerate(state: AgentState) -> str:
+    """Verify routing: regenerate once on a failed verification.
+
+    ``verify_node`` already replaced the answer with the shared refusal
+    on the final failure, so 'response' after that is safe; on the
+    first failure it returns 'reasoning' with ``strict_reasoning`` set.
+    """
+    if (
+        state.get("verify_result") == "fail"
+        and int(state.get("verify_attempts") or 0) <= MAX_VERIFY_REGENERATIONS
+    ):
+        return "reasoning"
+    return "response"
+
+
 def _build_graph():
     g = StateGraph(AgentState)
     g.add_node("planner", planner_node)
     g.add_node("retriever", retriever_node)
+    g.add_node("grade", grade_retrieval_node)
+    g.add_node("rewrite", rewrite_query_node)
     g.add_node("reasoning", reasoning_node)
+    g.add_node("verify", verify_node)
     g.add_node("direct", direct_answer_node)
     g.add_node("response", response_node)
     g.set_entry_point("planner")
@@ -389,8 +753,19 @@ def _build_graph():
         should_retrieve,
         {"retriever": "retriever", "direct": "direct"},
     )
-    g.add_edge("retriever", "reasoning")
-    g.add_edge("reasoning", "response")
+    g.add_edge("retriever", "grade")
+    g.add_conditional_edges(
+        "grade",
+        should_retry,
+        {"rewrite": "rewrite", "reasoning": "reasoning"},
+    )
+    g.add_edge("rewrite", "retriever")
+    g.add_edge("reasoning", "verify")
+    g.add_conditional_edges(
+        "verify",
+        should_regenerate,
+        {"reasoning": "reasoning", "response": "response"},
+    )
     g.add_edge("direct", "response")
     g.add_edge("response", END)
     return g.compile()
@@ -418,6 +793,13 @@ class AgentService:
             "answer": "",
             "citations": [],
             "needs_retrieval": True,
+            "errors": [],
+            "retries": 0,
+            "retrieval_grade": "",
+            "grade_reason": "",
+            "verify_result": "",
+            "verify_attempts": 0,
+            "strict_reasoning": False,
         }
         if stream_sink is not None:
             state["stream_sink"] = stream_sink
@@ -454,31 +836,44 @@ class AgentService:
     ) -> AsyncGenerator[dict, None]:
         """Run the same graph, yielding structured stream events.
 
-        Events: ``{"type": "status", "status": ...}``,
+        Events: ``{"type": "status", "status": ...}`` (started, grading,
+        rewriting, verifying, and any other graph status),
         ``{"type": "token", "token": ...}`` (reasoning-node tokens),
         ``{"type": "citations", "citations": [...]}``,
         ``{"type": "done", "answer": ..., "citations": [...]}``,
         ``{"type": "error", "detail": <safe message>}``.
-        The graph runs in a background task while tokens are drained from a
-        queue, so a slow LLM does not block event delivery. On graph
-        failure an ``error`` event is yielded (never a fabricated answer);
-        the caller (router) persists whatever was streamed so far.
+        The graph runs in a background task while tokens and status
+        events are drained from one queue in emission order, so a slow
+        LLM does not block event delivery. On graph failure an ``error``
+        event is yielded (never a fabricated answer); the caller
+        (router) persists whatever was streamed so far.
+        Note: if verification regenerates, the first reasoning attempt's
+        tokens are streamed and then superseded by the ``done`` answer
+        (the router replaces streamed text with the parsed final answer);
+        this matches the pre-Phase-C behaviour for citation blocks.
         """
-        queue: asyncio.Queue[str] = asyncio.Queue()
+        queue: asyncio.Queue[dict] = asyncio.Queue()
         initial_state = self._initial_state(
-            question, owner_id, history, document_id, stream_sink=queue.put_nowait
+            question,
+            owner_id,
+            history,
+            document_id,
+            stream_sink=lambda t: queue.put_nowait({"type": "token", "token": t}),
+        )
+        initial_state["status_sink"] = lambda s: queue.put_nowait(
+            {"type": "status", "status": s}
         )
         task = asyncio.ensure_future(_agent_graph.ainvoke(initial_state))
         yield {"type": "status", "status": "started"}
         try:
             while not task.done():
                 try:
-                    token = await asyncio.wait_for(queue.get(), timeout=0.05)
-                    yield {"type": "token", "token": token}
+                    event = await asyncio.wait_for(queue.get(), timeout=0.05)
+                    yield event
                 except TimeoutError:
                     continue
             while not queue.empty():
-                yield {"type": "token", "token": queue.get_nowait()}
+                yield queue.get_nowait()
             exc = task.exception()
             if exc is not None:
                 logger.error("Agent stream failed: %s", exc)

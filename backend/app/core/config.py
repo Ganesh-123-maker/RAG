@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # starting default, NOT a measured optimum -- Phase D must measure
     # hit-rate/recall at several thresholds before claiming it is tuned.
     RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.30
+    # Phase C: retrieval is graded "good" only if its top score meets
+    # this stricter bar. 0.50 is an unmeasured starting point, NOT a
+    # tuned optimum -- Phase D must measure grade thresholds before
+    # claiming any of them is tuned.
+    RETRIEVAL_GRADE_THRESHOLD: float = 0.50
     RETRIEVAL_FETCH_K: int = 20
     MMR_LAMBDA: float = 0.7
     # Generation budgets (Phase B): context is truncated lowest-score
@@ -70,7 +75,9 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_EMBEDDING_DIMENSIONS must be in 1..3072")
         return v
 
-    @field_validator("RETRIEVAL_SIMILARITY_THRESHOLD", "MMR_LAMBDA")
+    @field_validator(
+        "RETRIEVAL_SIMILARITY_THRESHOLD", "RETRIEVAL_GRADE_THRESHOLD", "MMR_LAMBDA"
+    )
     @classmethod
     def _validate_unit(cls, v: float) -> float:
         if not 0.0 <= v <= 1.0:
