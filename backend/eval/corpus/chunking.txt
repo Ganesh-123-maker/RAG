@@ -1,0 +1,41 @@
+Chunking Documents for Retrieval
+
+Large documents cannot be embedded as a single vector and expected to
+retrieve well. A whole book chapter compressed into one vector loses
+the detail that a specific question needs. Chunking splits a document
+into smaller pieces, each embedded separately, so retrieval can return
+the piece that actually answers the question.
+
+The simplest chunking method cuts text into fixed-size token windows.
+This guide uses chunks of 512 tokens with an overlap of 64 tokens.
+Overlap means the last 64 tokens of one chunk are repeated at the
+start of the next chunk, so a sentence that straddles a boundary is
+not lost. The step between chunk starts is therefore 512 minus 64,
+which is 448 tokens.
+
+Fixed windows alone can cut a sentence in half. Sentence-aware
+chunking avoids that by packing whole sentences into a chunk until
+the token budget is reached, and carrying the trailing sentences over
+as overlap. Only a single sentence longer than the whole chunk budget
+falls back to a plain token window, because there is no sentence
+boundary to respect.
+
+Good chunks carry metadata. Each chunk should record its index within
+the document, its character start and end offsets in the extracted
+text, and, when known, the page number or section heading it came
+from. Offsets and page numbers let an application show a citation
+that points at a real location, not just at a document name.
+
+Chunk size is a trade-off. Very small chunks retrieve precisely but
+may lack the surrounding context needed to interpret them. Very large
+chunks carry context but dilute the specific fact, so the embedding
+represents many topics at once and retrieval precision falls. A chunk
+of 512 tokens with 64 tokens of overlap is a common starting point,
+not a universal optimum; the right size depends on the documents and
+must be measured, not assumed.
+
+Repeated content should be deduplicated. If the same chunk text
+appears twice in one document, indexing it twice wastes space and
+can crowd the top results with near-duplicates. A content hash of
+the chunk text gives a stable identity for deduplication: identical
+hashes mean identical chunks.

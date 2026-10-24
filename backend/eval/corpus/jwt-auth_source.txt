@@ -1,0 +1,38 @@
+JSON Web Tokens for Authentication
+
+A JSON Web Token, usually called a JWT, is a compact way to represent
+claims between two parties. A JWT has three parts separated by dots:
+a header, a payload, and a signature. The header says which signing
+algorithm is used. The payload carries claims such as the subject,
+which identifies the user, and the expiry time. The signature proves
+that the token was issued by someone holding the secret key.
+
+The signing algorithm used in this guide is HS256, which is HMAC
+with SHA-256 and a shared secret. The server signs the token with
+its secret key and verifies incoming tokens with the same key. A
+token whose signature does not verify must be rejected, even if its
+payload looks plausible. The payload is only base64-encoded, not
+encrypted, so it must never contain a password or other secret.
+
+Access tokens should be short-lived. This guide uses an access token
+lifetime of 60 minutes. After 60 minutes the token expires and the
+client must obtain a new one. A separate refresh token, with a
+lifetime of 7 days in this guide, can be exchanged for a new access
+token without asking the user to log in again. Refresh tokens are
+stored more carefully than access tokens because their longer life
+makes them a more valuable target.
+
+Passwords are never stored in plain text. This guide stores passwords
+as bcrypt hashes with a cost factor of 12. Bcrypt is deliberately
+slow, which makes guessing passwords expensive for an attacker who
+obtains the hash database. Login attempts should also be rate
+limited, because even a slow hash does not help if an attacker can
+try unlimited passwords online.
+
+Two checks are easy to forget and expensive to miss. First, a token
+whose subject is not a valid user identifier must be rejected with
+an authentication error, not crash the server with a 500 error.
+Second, a user account that has been deactivated must not be able to
+authenticate, even with a previously valid password: the active flag
+must be checked on every login and on every token validation, not
+only at registration.

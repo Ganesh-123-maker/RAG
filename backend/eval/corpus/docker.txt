@@ -1,0 +1,38 @@
+Docker and Docker Compose for Development
+
+Docker packages an application and its dependencies into a container
+image. A Dockerfile describes the image in layers: each instruction
+adds a layer, and unchanged layers are reused from the build cache.
+Ordering instructions so that rarely changing steps come first keeps
+builds fast, because a change to application code does not invalidate
+the cached dependency-installation layer.
+
+Multi-stage builds keep production images small. A build stage
+installs compilers and dependencies and builds the application; a
+final runtime stage copies only the built output and the runtime
+dependencies. Build tools, source files, and caches stay out of the
+final image, which reduces both size and attack surface.
+
+Containers should not run as root by default. A Dockerfile can
+create a dedicated user and switch to it before the container starts.
+A process running as root inside a container that escapes its
+isolation has more privileges on the host than a process running as
+an unprivileged user, so the non-root user is a cheap, permanent
+improvement.
+
+Docker Compose runs several containers together. A compose file
+defines services, networks, and volumes. A backend service can depend
+on a database service with a condition of service_healthy, which
+means Compose waits until the database healthcheck passes before
+starting the backend. A healthcheck in this guide runs every 30
+seconds: for example, a database healthcheck runs its ready-command
+on that interval and reports healthy only when the database accepts
+connections.
+
+Two compose mistakes are common. First, an env_file entry that points
+at a file that does not exist makes Compose fail before any container
+starts; the file must exist or the entry must be removed. Second, a
+health endpoint that always returns success hides real outages: a
+liveness endpoint may be trivial, but a readiness endpoint must
+actually check its dependencies, such as the database and the vector
+store, and report unhealthy when one of them is down.

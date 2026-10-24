@@ -1,0 +1,1 @@
+{"documents":["vector-databases.txt","qdrant.md","langgraph.pdf","chunking.txt","embeddings.md","jwt-auth.docx","docker.txt","postgres.md","sse.txt","mmr.txt"],"note":"langgraph_source.txt and jwt-auth_source.txt are generator inputs, NOT corpus documents. They are not ingested; langgraph.pdf and jwt-auth.docx are."}
