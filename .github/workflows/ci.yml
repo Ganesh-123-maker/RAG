@@ -154,7 +154,7 @@ jobs:
       # local runs on Node 24 pass). Next 14 itself runs on 20,
       # but the test toolchain does not.
       - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "npm"
@@ -218,7 +218,7 @@ jobs:
       # local runs on Node 24 pass). Next 14 itself runs on 20,
       # but the test toolchain does not.
       - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "npm"
