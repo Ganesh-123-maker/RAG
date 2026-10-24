@@ -65,7 +65,7 @@ and PRs to `main`/`master`.
   clean (see docs/SECURITY.md). Non-blocking here means "visible
   but not gating", not "ignored": findings are documented with
   counts, reasons, and a review note.
-- **Frontend (blocking):** Node 20, `npm ci --legacy-peer-deps` (plain `npm ci` fails on vitest 5 / vite / @types/node peer conflicts; this matches the Dockerfile and setup.ps1 convention), `tsc --noEmit`,
+- **Frontend (blocking):** Node 24 (Vitest 5 requires Node ^22.12 || ^24; CI on Node 20 failed in undici with EBADENGINE warnings -- see CI fixes below), `npm ci --legacy-peer-deps` (plain `npm ci` fails on vitest 5 / vite / @types/node peer conflicts; this matches the Dockerfile and setup.ps1 convention), `tsc --noEmit`,
   `npm run lint`, Vitest, `next build`, Playwright chromium
   install, then Playwright E2E in mock-API mode. The server and
   the tests share one step on purpose: a background process
@@ -107,6 +107,27 @@ and PRs to `main`/`master`.
   Codecov is not configured, and a badge for an unconfigured
   service would be exactly the kind of fake badge Phase G exists
   to remove.
+
+## CI fixes found by running CI itself (not by reading it)
+
+Two CI failures on PR #7 were real and were fixed on the branch
+before merging -- they are part of Phase G, not post-merge patches:
+
+1. **npm ci peer conflicts:** plain `npm ci` failed in 11s on
+   vitest 5 / vite / @types/node peer conflicts. Fixed with
+   `npm ci --legacy-peer-deps` in both frontend jobs, matching
+   the Dockerfile and setup.ps1 convention.
+2. **Node 20 vs Vitest 5:** with install fixed, Vitest failed
+   on Node 20 (undici `Cannot read properties of undefined
+   (reading 'bind')`, with EBADENGINE warnings that Vitest 5
+   requires Node ^22.12 || ^24). Fixed by moving CI frontend
+   jobs and the frontend Dockerfile from Node 20 to Node 24
+   (Next 14 builds and runs on Node 24 locally: `next build`
+   7 pages and `npm run start` both verified on Node 24 in this
+   sandbox). After both fixes, backend tests and Ruff pass in
+   CI; the frontend job must be re-checked on the new run
+   before the merge chain proceeds -- see the handoff for the
+   final CI status.
 
 ## G2 -- Deployment: attempted, NOT completed (credentials missing)
 

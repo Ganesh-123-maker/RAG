@@ -124,12 +124,13 @@ reason.
 
 Not run cleanly in the Phase G sandbox (registry audit endpoint
 returned 403 -- a sandbox policy, not a clean result). It runs in CI
-as a non-blocking job (`frontend-security`, `--audit-level=moderate`)
-so its result is visible on every PR; until a CI run reports it,
-npm audit status is **unknown**, not clean. Note from Phase E:
-`npm ci` printed deprecation/security warnings for `next@14.2.5`
-(upstream security update available) -- the Next.js upgrade belongs
-with the dependency pass above.
+as a non-blocking job (`frontend-security`, `--audit-level=moderate`).
+The first CI run reported **15 vulnerabilities (3 moderate, 11
+high, 1 critical)**, including the known `next@14.2.5` security
+update (upstream patch available, noted since Phase E). The job is
+non-blocking by design, so this result is visible on every PR, not
+hidden -- and the Next.js upgrade belongs with the dependency pass
+above, before any public deploy.
 
 ## What is still open (security follow-ups)
 

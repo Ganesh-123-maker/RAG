@@ -149,10 +149,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      # Node 24, not 20: Vitest 5 requires Node ^22.12 || ^24
+      # (CI on Node 20 fails in undici with EBADENGINE warnings;
+      # local runs on Node 24 pass). Next 14 itself runs on 20,
+      # but the test toolchain does not.
+      - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
@@ -209,10 +213,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      # Node 24, not 20: Vitest 5 requires Node ^22.12 || ^24
+      # (CI on Node 20 fails in undici with EBADENGINE warnings;
+      # local runs on Node 24 pass). Next 14 itself runs on 20,
+      # but the test toolchain does not.
+      - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 

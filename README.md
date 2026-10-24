@@ -201,7 +201,7 @@ that matters here):
 | mypy | **NOT clean: 14 pre-existing errors** (non-blocking CI job, documented in `docs/phase-g-report.md`) |
 | Bandit | 11 Low, 0 Medium, 0 High |
 | pip-audit | 71 records (documented accepted risk, see `docs/SECURITY.md`) |
-| npm audit | not run cleanly in this sandbox (registry 403); runs in CI as a non-blocking job |
+| npm audit | CI first run: 15 vulnerabilities (3 moderate, 11 high, 1 critical), incl. Next.js 14.2.5 update; non-blocking CI job, see docs/SECURITY.md |
 | Docker builds / compose smoke | **not run in this sandbox (no Docker)**; covered by CI jobs (`docker-build`, `compose-smoke`) |
 
 Run the backend suite:
