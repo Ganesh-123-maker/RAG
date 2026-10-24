@@ -201,6 +201,15 @@ async def run_evaluation(cfg: dict) -> dict:
     owner_id = uuid.uuid4()
     doc_id_by_file: dict[str, str] = {}
     records: list[dict] = []
+    # Checkpoint every record as it completes, so a mid-run crash
+    # (e.g. a free-tier daily cap) does not lose completed questions.
+    # The final results.jsonl is still written at the end on success.
+    _checkpoint_dir = _unique_run_dir(Path(cfg["out_dir"]), cfg["run_id"])
+    _checkpoint_path = _checkpoint_dir / "results-partial.jsonl"
+
+    def _checkpoint(record: dict) -> None:
+        with _checkpoint_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
     async with factory() as session:
         session.add(
             User(
@@ -363,41 +372,42 @@ async def run_evaluation(cfg: dict) -> dict:
                 record["estimated_tokens"] = None
                 record["estimated_cost_usd"] = 0.0
             records.append(record)
+            _checkpoint(record)
 
         # --- Unanswerable probes.
         for item in unanswerable:
             result = await ask(item["question"])
-            records.append(
-                {
-                    "kind": "unanswerable",
-                    "id": item["id"],
-                    "question": item["question"],
-                    "mode": mode_label,
-                    "answer": result["answer"],
-                    "citations": result["citations"],
-                    "refused": _metrics.is_refusal(result["answer"]),
-                    "latency_seconds": round(result["latency"], 4),
-                }
-            )
+            _rec = {
+                "kind": "unanswerable",
+                "id": item["id"],
+                "question": item["question"],
+                "mode": mode_label,
+                "answer": result["answer"],
+                "citations": result["citations"],
+                "refused": _metrics.is_refusal(result["answer"]),
+                "latency_seconds": round(result["latency"], 4),
+            }
+            records.append(_rec)
+            _checkpoint(_rec)
 
         # --- Prompt-injection probes.
         for item in injection:
             result = await ask(item["question"])
-            records.append(
-                {
-                    "kind": "injection",
-                    "id": item["id"],
-                    "question": item["question"],
-                    "mode": mode_label,
-                    "answer": result["answer"],
-                    "citations": result["citations"],
-                    "passed": _metrics.injection_pass(
-                        result["answer"], result["citations"], item["forbidden"]
-                    ),
-                    "forbidden": item["forbidden"],
-                    "latency_seconds": round(result["latency"], 4),
-                }
-            )
+            _rec = {
+                "kind": "injection",
+                "id": item["id"],
+                "question": item["question"],
+                "mode": mode_label,
+                "answer": result["answer"],
+                "citations": result["citations"],
+                "passed": _metrics.injection_pass(
+                    result["answer"], result["citations"], item["forbidden"]
+                ),
+                "forbidden": item["forbidden"],
+                "latency_seconds": round(result["latency"], 4),
+            }
+            records.append(_rec)
+            _checkpoint(_rec)
 
     await engine.dispose()
 
@@ -419,6 +429,9 @@ async def run_evaluation(cfg: dict) -> dict:
             "groq-chat+openrouter-embeddings"
             if "groq" in os.environ.get("LLM_BASE_URL", "")
             and "openrouter" in os.environ.get("EMBEDDING_BASE_URL", "")
+            else "groq-chat+gemini-embeddings"
+            if "groq" in os.environ.get("LLM_BASE_URL", "")
+            and "generativelanguage" in os.environ.get("EMBEDDING_BASE_URL", "")
             else "gemini-openai-compat"
             if "generativelanguage" in os.environ.get("LLM_BASE_URL", "")
             else "openai"
@@ -534,6 +547,15 @@ async def run_evaluation(cfg: dict) -> dict:
                 "provider configuration, NOT OpenAI/gpt-4o, and must never "
                 "be presented as OpenAI results."
                 if "groq" in os.environ.get("LLM_BASE_URL", "")
+                and "openrouter" in os.environ.get("EMBEDDING_BASE_URL", "")
+                else "LIVE MODE (Groq chat + Gemini free embeddings via "
+                "OpenAI-compatible endpoints): real provider embeddings, "
+                "real graph LLM calls, and LLM-as-judge at temperature 0 "
+                "with a fixed rubric. Cost is $0 on the free tiers, "
+                "subject to their rate limits. These numbers measure this "
+                "provider configuration, NOT OpenAI/gpt-4o, and must never "
+                "be presented as OpenAI results."
+                if "groq" in os.environ.get("LLM_BASE_URL", "")
                 else "LIVE MODE: real OpenAI embeddings, real graph LLM calls, "
                 "and LLM-as-judge at temperature 0 with a fixed rubric. "
                 "Token/cost figures are tiktoken-based estimates, not metered "
@@ -565,7 +587,7 @@ async def run_evaluation(cfg: dict) -> dict:
         )
         summary["judge_correct_rate"] = None
 
-    out_dir = _unique_run_dir(Path(cfg["out_dir"]), cfg["run_id"])
+    out_dir = _checkpoint_dir
     (out_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
