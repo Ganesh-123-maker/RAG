@@ -23,6 +23,7 @@ from app.schemas.chat import (
     CitationSchema,
     ConversationListResponse,
     ConversationResponse,
+    ConversationUpdate,
     MessageResponse,
 )
 from app.services.agent_service import AgentService
@@ -184,6 +185,30 @@ async def get_conversation(
         title=conv.title,
         created_at=conv.created_at,
         messages=messages,
+    )
+
+
+@router.patch(
+    "/conversations/{conversation_id}", response_model=ConversationResponse
+)
+async def rename_conversation(
+    conversation_id: uuid.UUID,
+    payload: ConversationUpdate,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> ConversationResponse:
+    """Phase F: owner-scoped rename. Another user's conversation
+    is indistinguishable from a missing one (404)."""
+    conv_repo = ConversationRepository(db)
+    conv = await conv_repo.update_title_for_owner(
+        conversation_id, current_user.id, payload.title
+    )
+    if conv is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        )
+    return ConversationResponse(
+        id=conv.id, title=conv.title, created_at=conv.created_at, messages=[]
     )
 
 
