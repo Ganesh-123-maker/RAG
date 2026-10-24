@@ -255,8 +255,28 @@ async def run_evaluation(cfg: dict) -> dict:
             retrieved = await vector_svc.search(
                 query_vector=query_vector, owner_id=owner_id
             )
-            answer_obj = await agent.run(question, owner_id, history=[])
+            # Free-tier pacing: a transient 429 (per-minute quota) must not
+            # kill the whole run. Retry the whole question with backoff,
+            # then re-raise if it still fails so the failure is visible.
+            last_exc: Exception | None = None
+            for attempt, delay in enumerate((15.0, 30.0, 60.0)):
+                try:
+                    answer_obj = await agent.run(question, owner_id, history=[])
+                    break
+                except Exception as exc:  # noqa: BLE001 -- retry only 429s
+                    last_exc = exc
+                    text = str(exc)
+                    if "429" not in text and "temporarily unavailable" not in text:
+                        raise
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(delay)
+            else:  # pragma: no cover -- loop always breaks or raises
+                raise last_exc  # type: ignore[misc]
             latency = time.perf_counter() - t0
+            pace = float(cfg.get("pace_seconds") or 0)
+            if pace:
+                await asyncio.sleep(pace)
             return {
                 "retrieved": retrieved,
                 "answer": answer_obj.answer,
@@ -576,6 +596,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-mmr", action="store_true", help="disable MMR selection for this run"
     )
+    parser.add_argument(
+        "--pace-seconds",
+        type=float,
+        default=0.0,
+        help="sleep after each question (free-tier rate-limit pacing)",
+    )
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--corpus-dir", default=None)
     parser.add_argument("--golden-dir", default=None)
@@ -596,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
         "db_path": str(tmp / "eval.sqlite"),
         "upload_dir": str(tmp / "uploads"),
         "limit": args.limit,
+        "pace_seconds": args.pace_seconds,
         "variant": args.variant,
         "threshold": args.threshold,
         "no_mmr": args.no_mmr,
