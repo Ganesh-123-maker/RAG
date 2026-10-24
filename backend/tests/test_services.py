@@ -8,7 +8,6 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.document import Document
 from app.models.user import User
 from app.services.agent_service import (
     AgentError,
@@ -21,9 +20,18 @@ from app.services.agent_service import (
     should_retrieve,
 )
 from app.services.auth_service import AuthService
-from app.services.chunking_service import TextChunk, chunk_text, extract_text, get_tokenizer
+from app.services.chunking_service import (
+    TextChunk,
+    chunk_text,
+    extract_text,
+    get_tokenizer,
+)
 from app.services.document_service import DocumentService
-from app.services.embedding_service import EmbeddingError, EmbeddingService, get_openai_client
+from app.services.embedding_service import (
+    EmbeddingError,
+    EmbeddingService,
+    get_openai_client,
+)
 from app.services.rag_service import RagAnswer, parse_citations
 from app.services.vector_store_service import (
     RetrievedChunk,
@@ -38,7 +46,11 @@ async def test_auth_service(db_session: AsyncSession) -> None:
     from app.schemas.auth import RegisterRequest
 
     # Register
-    req = RegisterRequest(email="service_user@example.com", password="password123", full_name="Service User")
+    req = RegisterRequest(
+        email="service_user@example.com",
+        password="password123",
+        full_name="Service User",
+    )
     user = await svc.register(req)
     assert user.email == "service_user@example.com"
 
@@ -97,13 +109,20 @@ async def test_chunking_service_branches() -> None:
         assert "Paragraph 1" in res_docx
 
     # Error handling in PDF / DOCX
-    with patch("pdfplumber.open", side_effect=RuntimeError("Corrupt PDF")):
-        with pytest.raises(ValueError, match="Failed to extract text from PDF"):
-            extract_text(b"bad", "pdf")
+    with (
+        patch("pdfplumber.open", side_effect=RuntimeError("Corrupt PDF")),
+        pytest.raises(ValueError, match="Failed to extract text from PDF"),
+    ):
+        extract_text(b"bad", "pdf")
 
-    with patch("app.services.chunking_service.DocxDocument", side_effect=RuntimeError("Corrupt DOCX")):
-        with pytest.raises(ValueError, match="Failed to extract text from DOCX"):
-            extract_text(b"bad", "docx")
+    with (
+        patch(
+            "app.services.chunking_service.DocxDocument",
+            side_effect=RuntimeError("Corrupt DOCX"),
+        ),
+        pytest.raises(ValueError, match="Failed to extract text from DOCX"),
+    ):
+        extract_text(b"bad", "docx")
 
 
 @pytest.mark.asyncio
@@ -119,7 +138,9 @@ async def test_embedding_service() -> None:
     mock_data.embedding = [0.1] * 3072
     mock_resp.data = [mock_data]
 
-    with patch.object(svc._client.embeddings, "create", new_callable=AsyncMock, return_value=mock_resp):
+    with patch.object(
+        svc._client.embeddings, "create", new_callable=AsyncMock, return_value=mock_resp
+    ):
         vec = await svc.embed_text("Hello world\nwith newline")
         assert len(vec) == 3072
 
@@ -128,7 +149,12 @@ async def test_embedding_service() -> None:
     mock_item1 = MagicMock(index=1, embedding=[0.2] * 3072)
     mock_batch_resp = MagicMock(data=[mock_item1, mock_item0])
 
-    with patch.object(svc._client.embeddings, "create", new_callable=AsyncMock, return_value=mock_batch_resp):
+    with patch.object(
+        svc._client.embeddings,
+        "create",
+        new_callable=AsyncMock,
+        return_value=mock_batch_resp,
+    ):
         vectors = await svc.embed_batch(["text1", "text2"])
         assert len(vectors) == 2
         assert vectors[0] == [0.1] * 3072
@@ -136,7 +162,12 @@ async def test_embedding_service() -> None:
 
     # Phase A: no fallback vectors -- OpenAI failure raises EmbeddingError
     # (after tenacity retries) instead of returning substitute vectors.
-    with patch.object(svc._client.embeddings, "create", new_callable=AsyncMock, side_effect=RuntimeError("API down")):
+    with patch.object(
+        svc._client.embeddings,
+        "create",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("API down"),
+    ):
         with pytest.raises(EmbeddingError):
             await svc.embed_text("test fallback")
 
@@ -158,15 +189,24 @@ async def test_vector_store_service() -> None:
     mock_collections.collections = [MagicMock(name="other_collection")]
 
     with (
-        patch.object(svc._client, "get_collections", new_callable=AsyncMock, return_value=mock_collections),
-        patch.object(svc._client, "create_collection", new_callable=AsyncMock) as mock_create,
+        patch.object(
+            svc._client,
+            "get_collections",
+            new_callable=AsyncMock,
+            return_value=mock_collections,
+        ),
+        patch.object(
+            svc._client, "create_collection", new_callable=AsyncMock
+        ) as mock_create,
     ):
         await svc.ensure_collection()
         assert mock_create.called
 
     # Mock upsert
     chunks = [
-        TextChunk(text="Chunk 1", chunk_index=0, document_id=doc_id, document_name="doc.txt"),
+        TextChunk(
+            text="Chunk 1", chunk_index=0, document_id=doc_id, document_name="doc.txt"
+        ),
     ]
     embeddings = [[0.1] * 3072]
 
@@ -184,8 +224,12 @@ async def test_vector_store_service() -> None:
         "chunk_index": 0,
     }
 
-    with patch.object(svc._client, "search", new_callable=AsyncMock, return_value=[mock_result_point]):
-        results = await svc.search(query_vector=[0.1] * 3072, owner_id=owner_id, document_id=doc_id)
+    with patch.object(
+        svc._client, "search", new_callable=AsyncMock, return_value=[mock_result_point]
+    ):
+        results = await svc.search(
+            query_vector=[0.1] * 3072, owner_id=owner_id, document_id=doc_id
+        )
         assert len(results) == 1
         assert results[0].text == "Chunk 1"
         assert results[0].score == 0.95
@@ -227,9 +271,16 @@ async def test_document_service_flow(db_session: AsyncSession, tmp_path) -> None
             assert exc_large.value.status_code == 413
 
         # Ingest valid TXT file
-        valid_file = UploadFile(filename="sample.txt", file=io.BytesIO(b"Valid content for ingestion."))
+        valid_file = UploadFile(
+            filename="sample.txt", file=io.BytesIO(b"Valid content for ingestion.")
+        )
         with (
-            patch.object(svc._embed_svc, "embed_batch", new_callable=AsyncMock, return_value=[[0.1] * 3072]),
+            patch.object(
+                svc._embed_svc,
+                "embed_batch",
+                new_callable=AsyncMock,
+                return_value=[[0.1] * 3072],
+            ),
             patch.object(svc._vector_svc, "ensure_collection", new_callable=AsyncMock),
             patch.object(svc._vector_svc, "upsert_chunks", new_callable=AsyncMock),
         ):
@@ -237,7 +288,9 @@ async def test_document_service_flow(db_session: AsyncSession, tmp_path) -> None
             assert doc_id is not None
 
         # Delete document
-        with patch.object(svc._vector_svc, "delete_by_document", new_callable=AsyncMock):
+        with patch.object(
+            svc._vector_svc, "delete_by_document", new_callable=AsyncMock
+        ):
             await svc.delete(doc_id, user.id)
 
         # Delete non-existent document
@@ -283,7 +336,9 @@ async def test_rag_service() -> None:
 
     # Unknown ids -- including the old positional format -- are dropped,
     # never substituted with a different retrieved chunk.
-    raw, cits = parse_citations("Answer.\n\nCITATIONS:\n[9] nope.txt, chunk 3", mock_chunks)
+    raw, cits = parse_citations(
+        "Answer.\n\nCITATIONS:\n[9] nope.txt, chunk 3", mock_chunks
+    )
     assert cits == []
     raw, cits = parse_citations(
         "Answer.\n\nCITATIONS:\n[1] guide.txt, chunk 0", mock_chunks
@@ -299,7 +354,9 @@ async def test_agent_service_nodes() -> None:
     # Planner node normal
     mock_plan_resp = MagicMock()
     mock_plan_choice = MagicMock()
-    mock_plan_choice.message.content = '{"needs_retrieval": true, "retrieval_query": "What is Python?"}'
+    mock_plan_choice.message.content = (
+        '{"needs_retrieval": true, "retrieval_query": "What is Python?"}'
+    )
     mock_plan_resp.choices = [mock_plan_choice]
 
     with patch("app.services.agent_service.get_openai_client") as mock_get_client:
@@ -325,7 +382,9 @@ async def test_agent_service_nodes() -> None:
     # Planner node error fallback
     with patch("app.services.agent_service.get_openai_client") as mock_get_client:
         mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("LLM planner error"))
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=RuntimeError("LLM planner error")
+        )
         mock_get_client.return_value = mock_client
 
         res_planner_err = await planner_node(state)
@@ -334,11 +393,25 @@ async def test_agent_service_nodes() -> None:
 
     # Retriever node
     mock_chunks = [
-        RetrievedChunk(text="Python info", document_id=doc_id, document_name="doc.txt", chunk_index=0, score=0.9)
+        RetrievedChunk(
+            text="Python info",
+            document_id=doc_id,
+            document_name="doc.txt",
+            chunk_index=0,
+            score=0.9,
+        )
     ]
     with (
-        patch("app.services.embedding_service.EmbeddingService.embed_text", new_callable=AsyncMock, return_value=[0.1]*3072),
-        patch("app.services.vector_store_service.VectorStoreService.search", new_callable=AsyncMock, return_value=mock_chunks),
+        patch(
+            "app.services.embedding_service.EmbeddingService.embed_text",
+            new_callable=AsyncMock,
+            return_value=[0.1] * 3072,
+        ),
+        patch(
+            "app.services.vector_store_service.VectorStoreService.search",
+            new_callable=AsyncMock,
+            return_value=mock_chunks,
+        ),
     ):
         res_retriever = await retriever_node(res_planner)
         assert len(res_retriever["chunks"]) == 1
@@ -355,7 +428,9 @@ async def test_agent_service_nodes() -> None:
 
     with patch("app.services.agent_service.get_openai_client") as mock_get_client:
         mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_reasoning_resp)
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=mock_reasoning_resp
+        )
         mock_get_client.return_value = mock_client
 
         res_reasoning = await reasoning_node(res_retriever)
@@ -369,7 +444,9 @@ async def test_agent_service_nodes() -> None:
     # snippet fallback; it raises AgentError for the router to map to 502.
     with patch("app.services.agent_service.get_openai_client") as mock_get_client:
         mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("LLM reasoning error"))
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=RuntimeError("LLM reasoning error")
+        )
         mock_get_client.return_value = mock_client
 
         with pytest.raises(AgentError):
@@ -399,6 +476,11 @@ async def test_agent_service_nodes() -> None:
 
     # Full AgentService run
     agent = AgentService()
-    with patch.object(agent, "run", new_callable=AsyncMock, return_value=RagAnswer(answer="Final answer", citations=[])):
+    with patch.object(
+        agent,
+        "run",
+        new_callable=AsyncMock,
+        return_value=RagAnswer(answer="Final answer", citations=[]),
+    ):
         ans = await agent.run("Query", uuid.UUID(owner_id))
         assert ans.answer == "Final answer"

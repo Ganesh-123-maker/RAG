@@ -20,7 +20,9 @@ async def test_list_documents_empty(test_client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_upload_document_txt(test_client: AsyncClient) -> None:
     fake_embeddings = [[0.1] * 3072]
-    txt_content = b"This is a test document with enough content to create at least one chunk."
+    txt_content = (
+        b"This is a test document with enough content to create at least one chunk."
+    )
 
     with (
         patch(

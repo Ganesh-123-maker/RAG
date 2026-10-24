@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,11 +52,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # honest whereas failing at first user request is not). The
     # collection-dimension check lives in ensure_collection(), which
     # raises CollectionDimensionMismatchError on mismatch.
-    if (settings.ENVIRONMENT or "development").lower() != "test":
-        if not settings.OPENAI_API_KEY:
-            raise RuntimeError(
-                "OPENAI_API_KEY must be set (except in ENVIRONMENT=test)"
-            )
+    if (
+        settings.ENVIRONMENT or "development"
+    ).lower() != "test" and not settings.OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY must be set (except in ENVIRONMENT=test)")
     vs = VectorStoreService()
     await vs.ensure_collection()
     logger.info("Vector store collection ready: %s", settings.QDRANT_COLLECTION)

@@ -1,12 +1,13 @@
 """Tests for auth API routes."""
+
 from __future__ import annotations
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.main import app
 
 
@@ -16,10 +17,17 @@ async def test_register_success(db_session: AsyncSession) -> None:
     app.dependency_overrides.pop(get_current_user, None)
 
     from httpx import ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         response = await client.post(
             "/api/v1/auth/register",
-            json={"email": "user@example.com", "password": "securepass123", "full_name": "Alice"},
+            json={
+                "email": "user@example.com",
+                "password": "securepass123",
+                "full_name": "Alice",
+            },
         )
 
     app.dependency_overrides.clear()
@@ -35,7 +43,10 @@ async def test_register_duplicate_email(db_session: AsyncSession) -> None:
     app.dependency_overrides.pop(get_current_user, None)
 
     from httpx import ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         await client.post(
             "/api/v1/auth/register",
             json={"email": "dup@example.com", "password": "securepass123"},
@@ -55,7 +66,10 @@ async def test_register_weak_password(db_session: AsyncSession) -> None:
     app.dependency_overrides.pop(get_current_user, None)
 
     from httpx import ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         response = await client.post(
             "/api/v1/auth/register",
             json={"email": "weak@example.com", "password": "short"},
@@ -71,7 +85,10 @@ async def test_login_success(db_session: AsyncSession) -> None:
     app.dependency_overrides.pop(get_current_user, None)
 
     from httpx import ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         await client.post(
             "/api/v1/auth/register",
             json={"email": "login@example.com", "password": "goodpassword"},
@@ -92,7 +109,10 @@ async def test_login_wrong_password(db_session: AsyncSession) -> None:
     app.dependency_overrides.pop(get_current_user, None)
 
     from httpx import ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         await client.post(
             "/api/v1/auth/register",
             json={"email": "bad@example.com", "password": "goodpassword"},

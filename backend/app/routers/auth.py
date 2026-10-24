@@ -63,14 +63,14 @@ async def login(
             body = await request.json()
             email = body.get("email") or body.get("username")
             password = body.get("password")
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 -- malformed body already handled by the 422 below
             pass
     else:
         try:
             form = await request.form()
             email = form.get("username") or form.get("email")
             password = form.get("password")
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 -- malformed form already handled by the 422 below
             pass
 
     if not email or not password:
@@ -105,7 +105,7 @@ async def logout(request: Request, current_user: CurrentUser) -> JSONResponse:
             payload = decode_access_token(token)
             if payload.get("jti"):
                 revoke(payload["jti"])
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 -- logout must succeed even if the token is already invalid
             pass
     response = JSONResponse(content={"detail": "Logged out"})
     clear_auth_cookie(response)

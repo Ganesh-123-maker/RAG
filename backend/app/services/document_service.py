@@ -243,7 +243,9 @@ class DocumentService:
                 await self._doc_repo.set_status(
                     doc_id, "processing", progress=30, owner_id=owner_id
                 )
-                segments = await asyncio.to_thread(extract_segments, file_bytes, file_ext)
+                segments = await asyncio.to_thread(
+                    extract_segments, file_bytes, file_ext
+                )
                 raw_text = "\n\n".join(s.text for s in segments)
                 if not raw_text.strip():
                     raise ValueError("Document appears to be empty or unreadable")
@@ -283,7 +285,7 @@ class DocumentService:
                 )
                 await self._db.commit()
                 return
-            except Exception as exc:  # noqa: BLE001 -- all failures become error rows
+            except Exception as exc:
                 last_exc = exc
                 logger.error(
                     "Ingestion attempt %s/%s failed for document %s",
@@ -306,13 +308,17 @@ class DocumentService:
                         await self._vector_svc.delete_by_document(doc_id, owner_id)
                     except Exception as cleanup_exc:  # noqa: BLE001
                         logger.warning(
-                            "Vector cleanup failed for document %s: %s", doc_id, cleanup_exc
+                            "Vector cleanup failed for document %s: %s",
+                            doc_id,
+                            cleanup_exc,
                         )
                 _cleanup_file(file_path)
                 safe_message, status_code = _safe_ingestion_message(exc)
                 await self._doc_repo.mark_error(doc_id, safe_message, owner_id=owner_id)
                 await self._db.commit()
-                raise HTTPException(status_code=status_code, detail=safe_message) from exc
+                raise HTTPException(
+                    status_code=status_code, detail=safe_message
+                ) from exc
         if last_exc is not None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -333,7 +339,9 @@ class DocumentService:
             file_path = Path(settings.UPLOAD_DIR) / str(doc.owner_id) / doc.filename
             if not file_path.exists():
                 await self._doc_repo.mark_error(
-                    doc.id, "Ingestion was interrupted; please re-upload.", owner_id=doc.owner_id
+                    doc.id,
+                    "Ingestion was interrupted; please re-upload.",
+                    owner_id=doc.owner_id,
                 )
                 await self._db.commit()
                 errored += 1

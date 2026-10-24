@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,13 +36,11 @@ class AuthService:
         if user is not None and user.locked_until is not None:
             locked_until = user.locked_until
             if locked_until.tzinfo is None:
-                locked_until = locked_until.replace(tzinfo=timezone.utc)
-            if locked_until > datetime.now(timezone.utc):
+                locked_until = locked_until.replace(tzinfo=UTC)
+            if locked_until > datetime.now(UTC):
                 # 429 (not 401) so clients can distinguish lockout from
                 # a wrong password, with Retry-After in seconds.
-                retry_after = int(
-                    (locked_until - datetime.now(timezone.utc)).total_seconds()
-                )
+                retry_after = int((locked_until - datetime.now(UTC)).total_seconds())
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Account temporarily locked after repeated failed logins.",
@@ -51,8 +49,10 @@ class AuthService:
         if user is None or not verify_password(password, user.hashed_password):
             if user is not None:
                 await self._repo.record_failed_login(user)
-                if (user.failed_login_attempts or 0) >= settings.LOGIN_MAX_FAILED_ATTEMPTS:
-                    user.locked_until = datetime.now(timezone.utc) + timedelta(
+                if (
+                    user.failed_login_attempts or 0
+                ) >= settings.LOGIN_MAX_FAILED_ATTEMPTS:
+                    user.locked_until = datetime.now(UTC) + timedelta(
                         minutes=settings.LOCKOUT_MINUTES
                     )
                 # Explicit commit: get_db rolls back on HTTPException,

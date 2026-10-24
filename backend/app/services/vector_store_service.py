@@ -16,7 +16,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-from app.core.circuit_breaker import CircuitBreaker, CircuitOpenError
+from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import get_settings
 from app.services.chunking_service import TextChunk
 
