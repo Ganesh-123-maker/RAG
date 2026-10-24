@@ -348,7 +348,9 @@ function MessageBubble({ message }: { message: LocalMessage }) {
                           </span>
                           <span className="font-medium text-brand-300 truncate">{citation.document_name}</span>
                           <span className="ml-auto text-slate-500 text-xs flex-shrink-0">
-                            chunk {citation.chunk_index} · {(citation.score * 100).toFixed(0)}% match
+                            chunk {citation.chunk_index}
+                            {citation.page != null ? ` · p. ${citation.page}` : ""}
+                            {citation.section ? ` · ${citation.section}` : ""} · {(citation.score * 100).toFixed(0)}% match
                           </span>
                         </div>
                         <p className="text-slate-400 text-xs leading-relaxed pl-7 line-clamp-2">

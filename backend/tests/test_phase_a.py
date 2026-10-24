@@ -163,7 +163,7 @@ async def test_ingestion_cleanup_after_upsert(
 async def test_stream_nonstream_equivalence() -> None:
     """A2: same graph, same fixture -> same answer and citations."""
     plan = '{"needs_retrieval": true, "retrieval_query": "capital of France"}'
-    reasoning = "Paris.\n\nCITATIONS:\n[1] facts.txt, chunk 0"
+    reasoning = f"Paris.\n\nCITATIONS:\n[{_CHUNK.chunk_id}] facts.txt, chunk 0"  # Phase B: citations by chunk id, not position
     owner_id = uuid.uuid4()
 
     with (
@@ -172,7 +172,7 @@ async def test_stream_nonstream_equivalence() -> None:
             return_value=_mock_llm(
                 plan,
                 reasoning,
-                stream_tokens=["Par", "is.\n\nCITATIONS:\n[1] facts.txt, chunk 0"],
+                stream_tokens=["Par", f"is.\n\nCITATIONS:\n[{_CHUNK.chunk_id}] facts.txt, chunk 0"],
             ),
         ),
         patch(
@@ -195,7 +195,7 @@ async def test_stream_nonstream_equivalence() -> None:
             return_value=_mock_llm(
                 plan,
                 reasoning,
-                stream_tokens=["Par", "is.\n\nCITATIONS:\n[1] facts.txt, chunk 0"],
+                stream_tokens=["Par", f"is.\n\nCITATIONS:\n[{_CHUNK.chunk_id}] facts.txt, chunk 0"],
             ),
         ),
         patch(

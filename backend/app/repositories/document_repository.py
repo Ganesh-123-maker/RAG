@@ -20,6 +20,7 @@ class DocumentRepository:
         original_name: str,
         file_type: str,
         file_size_bytes: int,
+        content_hash: str | None = None,
     ) -> Document:
         doc = Document(
             owner_id=owner_id,
@@ -27,11 +28,24 @@ class DocumentRepository:
             original_name=original_name,
             file_type=file_type,
             file_size_bytes=file_size_bytes,
+            content_hash=content_hash,
             status="processing",
         )
         self._db.add(doc)
         await self._db.flush()
         return doc
+
+    async def get_by_content_hash_for_owner(
+        self, owner_id: uuid.UUID, content_hash: str
+    ) -> Document | None:
+        """Phase B dedupe lookup: the same bytes for the same owner."""
+        result = await self._db.execute(
+            select(Document).where(
+                Document.owner_id == owner_id,
+                Document.content_hash == content_hash,
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def get_by_id(self, doc_id: uuid.UUID) -> Document | None:
         """Deprecated: unscoped lookup. Production callers must use

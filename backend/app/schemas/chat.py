@@ -12,6 +12,11 @@ class CitationSchema(BaseModel):
     chunk_index: int
     score: float
     snippet: str
+    # Phase B: stable chunk id, page and section when known. Defaults
+    # keep citations stored before Phase B (without these fields) valid.
+    chunk_id: str = ""
+    page: int | None = None
+    section: str | None = None
 
 
 class ChatRequest(BaseModel):
