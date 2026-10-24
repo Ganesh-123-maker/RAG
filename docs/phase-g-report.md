@@ -117,6 +117,24 @@ before merging -- they are part of Phase G, not post-merge patches:
    vitest 5 / vite / @types/node peer conflicts. Fixed with
    `npm ci --legacy-peer-deps` in both frontend jobs, matching
    the Dockerfile and setup.ps1 convention.
+3. **Qdrant healthcheck broke `docker compose up`:** the CI
+   compose-smoke job failed at stack start because Qdrant never
+   became healthy: its compose healthcheck ran `wget .../healthz`
+   inside the qdrant/qdrant image, which ships no wget/curl, so
+   the check failed forever even though Qdrant itself was fine
+   (Postgres went healthy; Qdrant stayed "Waiting" until the
+   retries exhausted after ~2 minutes). Fixed by removing the
+   in-container Qdrant healthcheck, changing the backend's
+   `depends_on` for Qdrant to `service_started`, and waiting for
+   Qdrant readiness in `backend/entrypoint.sh` with a Python
+   stdlib poll of `/healthz` (120s timeout, skipped for
+   in-memory/path modes). Readiness is still re-checked by the
+   app's `/ready` endpoint after boot. The CI smoke job's start
+   step now also dumps `docker compose logs` on failure, so a
+   future stack-start failure is diagnosable from the log.
+   After this fix, the compose-smoke result must be re-checked
+   on the new run before the merge chain proceeds -- see the
+   handoff for the final CI status.
 2. **Node 20 vs Vitest 5:** with install fixed, Vitest failed
    on Node 20 (undici `Cannot read properties of undefined
    (reading 'bind')`, with EBADENGINE warnings that Vitest 5

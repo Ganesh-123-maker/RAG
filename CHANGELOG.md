@@ -115,6 +115,10 @@ this changelog -- see `docs/EVALUATION.md` and `docs/DEPLOYMENT.md`.
   (README already claimed MIT; the file itself was missing).
 - Cleanup: unused `zustand` dependency removed; backend Ruff
   clean (auto-fixes + config for the FastAPI `Depends` idiom).
+- Compose fix found by CI: Qdrant healthcheck removed (image
+  ships no wget/curl; it made `docker compose up` report Qdrant
+  unhealthy forever) in favour of an entrypoint readiness wait
+  plus `/ready`; CI smoke start step dumps logs on failure.
 - Measured Phase G results: backend 122 passed / 91% coverage,
   frontend 17 Vitest passed, `tsc`/`lint` clean, `next build`
   7 pages, Playwright E2E 1 passed (mock-API). Docker builds and

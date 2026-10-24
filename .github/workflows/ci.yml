@@ -266,7 +266,7 @@ jobs:
         env:
           OPENAI_API_KEY: "test-smoke-key"
           JWT_SECRET_KEY: "ci-test-secret-key-minimum-32-chars-long"
-        run: docker compose up -d --build
+        run: docker compose up -d --build || (docker compose logs; exit 1)
 
       - name: Wait for backend readiness
         run: |
