@@ -17,7 +17,18 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY . .
 
+# Non-root runtime user (uploads dir is pre-created so the named volume
+# inherits its ownership on first mount).
+RUN mkdir -p /app/uploads && \
+    useradd --create-home --uid 10001 appuser && \
+    chown -R appuser:appuser /app
+
 # Ensure Python finds the app package
 ENV PYTHONPATH=/app
 
 EXPOSE 8000
+
+USER appuser
+
+# Runs `alembic upgrade head` then uvicorn; see entrypoint.sh.
+CMD ["sh", "entrypoint.sh"]
