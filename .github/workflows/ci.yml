@@ -284,8 +284,20 @@ jobs:
       - name: Check liveness and frontend
         run: |
           curl -fsS http://localhost:8000/health
-          curl -fsS http://localhost:3000/login > /dev/null
-          echo "smoke OK"
+          # Frontend needs a readiness wait too: the previous version
+          # curled /login ~0.1s after the container started and got
+          # "connection reset" from a Next server that was still
+          # starting, even though the stack was healthy.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/login > /dev/null; then
+              echo "smoke OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "frontend never became ready"
+          docker compose logs frontend
+          exit 1
 
       - name: Stop stack
         if: always()

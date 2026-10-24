@@ -135,6 +135,13 @@ before merging -- they are part of Phase G, not post-merge patches:
    After this fix, the compose-smoke result must be re-checked
    on the new run before the merge chain proceeds -- see the
    handoff for the final CI status.
+4. **Frontend readiness wait in the smoke job:** with Qdrant
+   fixed, `/ready` passed and `/health` passed, but the smoke
+   step curled the frontend ~0.1s after its container started
+   and got "connection reset" from a Next server that was still
+   starting. Fixed with a 60x2s poll loop for `/login` (and
+   frontend logs on failure), mirroring the backend readiness
+   wait. This is a test-harness timing fix, not an app fix.
 2. **Node 20 vs Vitest 5:** with install fixed, Vitest failed
    on Node 20 (undici `Cannot read properties of undefined
    (reading 'bind')`, with EBADENGINE warnings that Vitest 5
