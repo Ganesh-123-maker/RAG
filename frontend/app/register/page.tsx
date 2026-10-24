@@ -6,7 +6,6 @@ import Link from "next/link";
 import { Brain, Mail, Lock, User, Eye, EyeOff, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "@/lib/api";
-import Cookies from "js-cookie";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -23,11 +22,13 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await api.post("/api/v1/auth/register", form);
-      const loginForm = new FormData();
-      loginForm.append("username", form.email);
-      loginForm.append("password", form.password);
-      const loginRes = await api.post("/api/v1/auth/login", loginForm);
-      Cookies.set("access_token", loginRes.data.access_token, { path: "/", expires: 1 });
+      // JSON login (the old FormData login through a JSON-hardcoded
+      // axios instance could 422 after a successful registration).
+      // The backend sets the httpOnly cookie on this response.
+      await api.post("/api/v1/auth/login", {
+        email: form.email,
+        password: form.password,
+      });
       toast.success("Welcome aboard! 🎉");
       router.push("/dashboard");
     } catch (err: unknown) {

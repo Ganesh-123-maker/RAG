@@ -1,10 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Brain, FileText, MessageSquare, Zap, Shield, ChevronRight } from "lucide-react";
-import Cookies from "js-cookie";
 
 const features = [
   {
@@ -30,14 +27,10 @@ const features = [
 ];
 
 export default function LandingPage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    const token = Cookies.get("access_token");
-    if (token) {
-      router.push("/dashboard");
-    }
-  }, [router]);
+  // Phase E: httpOnly cookies are invisible to JS, so the landing
+  // page no longer presence-checks a token. It links to the
+  // dashboard, which proves auth via GET /me and redirects to
+  // /login on failure.
 
   return (
     <div className="min-h-screen flex flex-col">

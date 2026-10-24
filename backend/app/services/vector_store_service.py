@@ -16,6 +16,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
+from app.core.circuit_breaker import CircuitBreaker, CircuitOpenError
 from app.core.config import get_settings
 from app.services.chunking_service import TextChunk
 
@@ -179,11 +180,24 @@ class CollectionDimensionMismatchError(ValueError):
 
 
 class VectorStoreService:
-    def __init__(self, reranker: Reranker | None = None) -> None:
+    def __init__(
+        self,
+        reranker: Reranker | None = None,
+        breaker: CircuitBreaker | None = None,
+    ) -> None:
         self._client = get_qdrant_client()
         self._collection = settings.QDRANT_COLLECTION
         self._dim = settings.OPENAI_EMBEDDING_DIMENSIONS
         self._reranker = reranker or IdentityReranker()
+        # Phase E circuit breaker around Qdrant search: after N
+        # consecutive failures, search fails fast (CircuitOpenError)
+        # instead of waiting on a dead dependency. Callers (the agent
+        # retriever) map it to AgentError -> 502, as with any
+        # retrieval failure; the breaker itself never leaks details.
+        self._breaker = breaker or CircuitBreaker(
+            failure_threshold=settings.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+            cooldown_seconds=settings.CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+        )
 
     async def ensure_collection(self) -> None:
         try:
@@ -299,15 +313,21 @@ class VectorStoreService:
                 )
             )
 
-        results = await self._client.search(
-            collection_name=self._collection,
-            query_vector=query_vector,
-            query_filter=Filter(must=must_conditions),
-            limit=pool,
-            with_payload=True,
-            with_vectors=True,
-            score_threshold=threshold if threshold > 0 else None,
-        )
+        self._breaker.before_call()
+        try:
+            results = await self._client.search(
+                collection_name=self._collection,
+                query_vector=query_vector,
+                query_filter=Filter(must=must_conditions),
+                limit=pool,
+                with_payload=True,
+                with_vectors=True,
+                score_threshold=threshold if threshold > 0 else None,
+            )
+        except Exception:
+            self._breaker.on_failure()
+            raise
+        self._breaker.on_success()
 
         retrieved: list[RetrievedChunk] = []
         for r in results:

@@ -11,8 +11,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import database as db_module
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
+from app.core.quotas import check_daily_quota, estimate_tokens, record_daily_usage
+from app.core.rate_limit import check_rate_limit
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.document_repository import DocumentRepository
 from app.schemas.chat import (
@@ -78,6 +81,9 @@ async def chat(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:
+    settings = get_settings()
+    check_rate_limit(f"chat:{current_user.id}", settings.CHAT_RATE_LIMIT_PER_MINUTE, 60)
+    check_daily_quota(current_user.id)
     conv_repo = ConversationRepository(db)
     conv = await _resolve_conversation(conv_repo, payload, current_user.id)
     await _check_document(db, payload.document_id, current_user.id)
@@ -106,6 +112,10 @@ async def chat(
             detail="Chat service is temporarily unavailable.",
         ) from exc
 
+    record_daily_usage(
+        current_user.id,
+        estimate_tokens(payload.question) + estimate_tokens(result.answer),
+    )
     citations_json = json.dumps(result.citations)
     assistant_msg = await conv_repo.add_message(
         conversation_id=conv.id,
@@ -214,6 +224,9 @@ async def chat_stream(
     so it is saved even if the client disconnects mid-stream (with whatever
     was streamed so far) instead of being lost.
     """
+    settings = get_settings()
+    check_rate_limit(f"chat:{current_user.id}", settings.CHAT_RATE_LIMIT_PER_MINUTE, 60)
+    check_daily_quota(current_user.id)
     conv_repo = ConversationRepository(db)
     conv = await _resolve_conversation(conv_repo, payload, current_user.id)
     conv_id = conv.id

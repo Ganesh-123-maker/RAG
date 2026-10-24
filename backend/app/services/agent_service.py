@@ -46,6 +46,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.core.tracing import trace_span
 from app.services.embedding_service import EmbeddingService, get_openai_client
 from app.services.rag_service import RagAnswer, parse_citations
 from app.services.vector_store_service import RetrievedChunk, VectorStoreService
@@ -737,16 +738,32 @@ def should_regenerate(state: AgentState) -> str:
     return "response"
 
 
+def _traced(name: str, fn):  # type: ignore[no-untyped-def]
+    """Wrap a graph node with a log-based tracing span (Phase E).
+
+    The span boundary is the node itself, so a future LangSmith /
+    Langfuse integration can replace this wrapper without touching
+    node logic. No tracing key is required.
+    """
+
+    async def wrapped(state: AgentState) -> dict:
+        with trace_span(f"graph.{name}"):
+            return await fn(state)
+
+    wrapped.__name__ = fn.__name__
+    return wrapped
+
+
 def _build_graph():
     g = StateGraph(AgentState)
-    g.add_node("planner", planner_node)
-    g.add_node("retriever", retriever_node)
-    g.add_node("grade", grade_retrieval_node)
-    g.add_node("rewrite", rewrite_query_node)
-    g.add_node("reasoning", reasoning_node)
-    g.add_node("verify", verify_node)
-    g.add_node("direct", direct_answer_node)
-    g.add_node("response", response_node)
+    g.add_node("planner", _traced("planner", planner_node))
+    g.add_node("retriever", _traced("retriever", retriever_node))
+    g.add_node("grade", _traced("grade", grade_retrieval_node))
+    g.add_node("rewrite", _traced("rewrite", rewrite_query_node))
+    g.add_node("reasoning", _traced("reasoning", reasoning_node))
+    g.add_node("verify", _traced("verify", verify_node))
+    g.add_node("direct", _traced("direct", direct_answer_node))
+    g.add_node("response", _traced("response", response_node))
     g.set_entry_point("planner")
     g.add_conditional_edges(
         "planner",

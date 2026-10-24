@@ -1,21 +1,22 @@
 import axios from "axios";
-import Cookies from "js-cookie";
-
 const BASE_URL = "";
 
 export const api = axios.create({
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true,
 });
 
+// Phase E: no JS token handling. The backend sets an httpOnly
+// cookie on /auth/login; the browser sends it automatically on
+// same-origin requests (withCredentials), so JS never holds the
+// token and cannot leak it via XSS. Bearer auth is still
+// supported server-side for non-browser API clients.
 export const authApi = () => {
-  const token = Cookies.get("access_token");
   return axios.create({
     baseURL: BASE_URL,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
+    withCredentials: true,
   });
 };
 

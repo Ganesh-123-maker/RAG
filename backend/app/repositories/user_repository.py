@@ -29,3 +29,10 @@ class UserRepository:
     async def exists_by_email(self, email: str) -> bool:
         user = await self.get_by_email(email)
         return user is not None
+
+    async def record_failed_login(self, user: User) -> None:
+        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+
+    async def reset_failed_logins(self, user: User) -> None:
+        user.failed_login_attempts = 0
+        user.locked_until = None
