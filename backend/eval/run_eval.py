@@ -343,9 +343,11 @@ async def run_evaluation(cfg: dict) -> dict:
                     "input": in_tokens,
                     "output": out_tokens,
                 }
-                # Gemini free tier via its OpenAI-compatible endpoint costs
-                # $0; the gpt-4o pricing constants do not apply to it.
-                if "generativelanguage" in os.environ.get("LLM_BASE_URL", ""):
+                # Free-tier providers via OpenAI-compatible endpoints cost
+                # $0; the gpt-4o pricing constants do not apply to them.
+                # Only a real OpenAI base URL (or no override) is priced.
+                _base = os.environ.get("LLM_BASE_URL", "")
+                if _base and "api.openai.com" not in _base:
                     record["estimated_cost_usd"] = 0.0
                 else:
                     record["estimated_cost_usd"] = round(
@@ -414,9 +416,14 @@ async def run_evaluation(cfg: dict) -> dict:
     summary: dict = {
         "mode": mode_label,
         "provider": (
-            "gemini-openai-compat"
+            "groq-chat+openrouter-embeddings"
+            if "groq" in os.environ.get("LLM_BASE_URL", "")
+            and "openrouter" in os.environ.get("EMBEDDING_BASE_URL", "")
+            else "gemini-openai-compat"
             if "generativelanguage" in os.environ.get("LLM_BASE_URL", "")
             else "openai"
+            if not os.environ.get("LLM_BASE_URL")
+            else "openai-compat"
         ),
         "variant": cfg.get("variant", "current-config"),
         "run_id": cfg["run_id"],
@@ -519,6 +526,14 @@ async def run_evaluation(cfg: dict) -> dict:
                 "These numbers measure the Gemini configuration, NOT "
                 "OpenAI/gpt-4o, and must never be presented as OpenAI results."
                 if "generativelanguage" in os.environ.get("LLM_BASE_URL", "")
+                else "LIVE MODE (Groq chat + OpenRouter free embeddings via "
+                "OpenAI-compatible endpoints): real provider embeddings, "
+                "real graph LLM calls, and LLM-as-judge at temperature 0 "
+                "with a fixed rubric. Cost is $0 on the free tiers, "
+                "subject to their rate limits. These numbers measure this "
+                "provider configuration, NOT OpenAI/gpt-4o, and must never "
+                "be presented as OpenAI results."
+                if "groq" in os.environ.get("LLM_BASE_URL", "")
                 else "LIVE MODE: real OpenAI embeddings, real graph LLM calls, "
                 "and LLM-as-judge at temperature 0 with a fixed rubric. "
                 "Token/cost figures are tiktoken-based estimates, not metered "
