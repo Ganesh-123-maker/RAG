@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.conversation import Conversation
     from app.models.document import Document
+    from app.models.refresh_token import RefreshToken
 
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -42,6 +43,9 @@ class User(Base):
     )
     conversations: Mapped[list[Conversation]] = relationship(
         "Conversation", back_populates="owner", cascade="all, delete-orphan"
+    )
+    refresh_tokens: Mapped[list[RefreshToken]] = relationship(
+        "RefreshToken", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

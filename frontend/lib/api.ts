@@ -1,4 +1,4 @@
-import axios, { type AxiosError } from "axios";
+import axios, { type AxiosError, type AxiosRequestConfig } from "axios";
 
 const BASE_URL = "";
 
@@ -41,9 +41,49 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+// Refresh flow: on a 401 the access cookie has expired (60 min)
+// but the refresh cookie (7 days, auth-path scoped) may still be
+// valid. Exactly one in-flight refresh is shared by all concurrent
+// 401 waiters, and each original request is retried at most once;
+// if refresh fails we fall back to the redirect-to-/login behaviour.
+// Requests to the login/refresh endpoints themselves never trigger
+// a refresh (that would loop).
+let refreshPromise: Promise<unknown> | null = null;
+
+function refreshAccessToken(): Promise<unknown> {
+  if (!refreshPromise) {
+    refreshPromise = api
+      .post("/api/v1/auth/refresh")
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+type RetriableConfig = {
+  _retry?: boolean;
+  url?: string;
+};
+
+function isAuthEndpoint(url: string | undefined): boolean {
+  if (!url) return false;
+  return url.includes("/auth/login") || url.includes("/auth/refresh");
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
+    const config = error?.config as (AxiosRequestConfig & RetriableConfig) | undefined;
+    if (error?.response?.status === 401 && config && !config._retry && !isAuthEndpoint(config.url)) {
+      config._retry = true;
+      try {
+        await refreshAccessToken();
+        return api.request(config);
+      } catch {
+        // Refresh failed: fall through to the login redirect below.
+      }
+    }
     if (error?.response?.status === 401) {
       handleUnauthorized();
     }

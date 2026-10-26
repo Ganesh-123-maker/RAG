@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str | None = None
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # Refresh tokens: opaque, hashed in the DB, rotated on every use
+    # with reuse detection (see services/refresh_token_service.py).
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
@@ -122,6 +125,7 @@ class Settings(BaseSettings):
     @field_validator(
         "MAX_UPLOAD_SIZE_MB",
         "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
+        "REFRESH_TOKEN_EXPIRE_DAYS",
         "RETRIEVAL_TOP_K",
         "RETRIEVAL_FETCH_K",
         "AUTH_RATE_LIMIT_PER_MINUTE",

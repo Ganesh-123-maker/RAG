@@ -9,10 +9,23 @@
   JavaScript never sees the token (Phase E removed all `js-cookie`
   token handling from app code; the `js-cookie` package itself was
   already gone from `package.json` by Phase F).
-- Logout revokes only the current token, via an in-memory denylist
-  (`core/token_denylist.py`). **Refresh tokens are deferred** (Phase
-  E decision): there is no refresh flow, and logout revocation does
-  not survive a process restart or span replicas.
+- Logout revokes the current access token, via an in-memory denylist
+  (`core/token_denylist.py`), and revokes the presented refresh
+  token in the database. Access-token denylist revocation does not
+  survive a process restart or span replicas; refresh-token
+  revocation does (it is a DB row, not process memory).
+- Refresh tokens: opaque tokens (`secrets.token_urlsafe(32)`)
+  stored only as SHA-256 hashes (`models/refresh_token.py`,
+  migration `004_refresh_tokens`), 7-day expiry
+  (`REFRESH_TOKEN_EXPIRE_DAYS`), httpOnly cookie scoped to
+  `/api/v1/auth`, rotated on every use in the same family
+  (`services/refresh_token_service.py`). Presenting an
+  already-replaced token is reuse (stolen-token replay): the whole
+  family is revoked. Expired, revoked, and unknown tokens all
+  return the same generic 401, so failures do not leak which reason
+  applied. The frontend retries once after a successful refresh
+  (`lib/api.ts`, one shared in-flight refresh for concurrent
+  401s); if refresh fails it falls back to the login redirect.
 - Login lockout: 5 failed attempts per account, then 15 minutes
   locked (429 + `Retry-After`). Register/login are rate-limited per
   email/IP (see below).
