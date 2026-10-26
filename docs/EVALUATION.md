@@ -29,7 +29,7 @@ output, it is not quoted.
 | Mode | What it runs | What it proves |
 |---|---|---|
 | `offline-pipeline-smoke` | Fake hashed bag-of-words embeddings + a fake LLM that copies the best-overlapping context chunk; real ingestion, real in-memory Qdrant search, real graded graph, real citation parsing, real metric code | The pipeline runs end to end. **NOT a quality measurement.** |
-| `live` | Real embeddings, real graph, real GPT-4o, LLM-as-judge at temperature 0 with a fixed rubric | Answer quality, retrieval quality, latency, cost -- the only mode whose scores may be quoted as system quality. **Never run as of v1.0.0.** |
+| `live` | Real provider embeddings, real graph, real provider LLM, LLM-as-judge at temperature 0 with a fixed rubric | Answer quality, retrieval quality, latency, cost -- the only mode whose scores may be quoted as system quality. The provider is recorded per run in `summary.json` (`provider`, `config.chat_model`, `config.embedding_model`); numbers from one provider must never be quoted as another provider's. First live runs (2026-10-24/26) used Gemini free tier, **not** OpenAI/GPT-4o, because the connected OpenAI account returned `credit_balance_exhausted`. |
 
 ## Metrics (and their limits)
 
@@ -85,27 +85,86 @@ What these runs teach, and what they do not:
   reason these numbers say nothing about real answer quality. They
   validate the metric plumbing, not the model.
 
-### Live run: BLOCKED (not run, not approximated)
+### Live runs: Gemini free tier (OpenAI-compatible endpoint)
 
-No `OPENAI_API_KEY` was present in any phase sandbox (checked by
-presence only; no key was printed, read from any `.env` file, or
-requested during development). The runner refuses to fabricate a live
-run: with a placeholder or absent key it exits with the blocked
-message instead of writing live-labelled output.
+The OpenAI path stayed blocked (`credit_balance_exhausted` on the
+connected account), so the first live runs used Gemini free tier via
+its OpenAI-compatible endpoint: chat `gemini-3.5-flash-lite`,
+embeddings `gemini-embedding-001` (3072 dims), cost $0. These numbers
+measure the **Gemini configuration**, not OpenAI/GPT-4o, and must
+never be quoted as OpenAI results. Free-tier interruptions are part
+of the record, not smoothed away: the runs below survived an
+OpenRouter daily cap, a Groq daily token cap, two runtime restarts,
+and a Gemini daily quota exhaustion, via per-question checkpointing
+(`results-partial.jsonl`) and `--resume`.
 
-To run it (maintainer, with a key that has quota for ~77 questions x
-planner/reasoning/judge calls -- use `--limit` first):
+| Run | hit@1 | hit@3 | hit@5 | MRR | Citation precision | Faithfulness | Refusal acc. | Injection pass | Judge correct | Latency p50/p95 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `gemini-live-limit20` (20 golden, threshold 0.30) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9833 | 0.5625 (9/16) | 0.8333 (5/6) | 20/20 | 8.41s / 14.33s |
+| `gemini-live-full` (55 golden, threshold 0.30) | 1.0 | 1.0 | 1.0 | 1.0 | 0.9623 | 0.9636 | 0.6875 (11/16) | 0.8333 (5/6) | 52/54 (mmr-02 judge 503'd; wrong: vec-05, sse-02) | 9.98s / 78.46s |
+| `gemini-live-limit20-threshold050` (20 golden, threshold 0.50) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.50 (8/16) | 1.0 (6/6) | 16/16 evaluated (4 judge calls 503'd: qdr-01/02/05/06) | 13.08s / 181.86s |
+
+Raw outputs: `docs/eval/gemini-live-limit20/`,
+`docs/eval/gemini-live-full/`,
+`docs/eval/gemini-live-limit20-threshold050/` (42, 77, and 42
+records respectively). The threshold-0.50 variant's records span two
+days (Oct 24 + Oct 26) because the Gemini daily quota (500
+generate-content requests/day for this model) exhausted mid-run; the
+remaining 8 questions were resumed after the reset with `--resume`.
+
+What these runs teach, and what they do not:
+
+- Retrieval is perfect on this corpus at either threshold, but the
+  corpus is only 10 documents and the golden questions were written
+  against them, so 1.0 hit rates prove the pipeline end to end, not
+  general retrieval quality on a large corpus.
+- Refusal is the weak metric (0.50-0.6875 across runs), and it
+  wobbles run to run on identical probes (the same probes fail in
+  different combinations), which is itself a finding: refusal is not
+  deterministic at the current settings.
+- **Tuning decision (evidence, not a guess): raising the similarity
+  threshold 0.30 -> 0.50 did NOT improve refusal** (8/16 vs 9/16 on
+  the same 20-golden subset; the one-question difference is within
+  run-to-run LLM variation), while golden retrieval was unchanged
+  (20/20 hit@1 both ways, as predicted: golden top-scores in the
+  full run ranged from 0.64 upward, median 0.735, none below 0.50). The
+  production default therefore **stays at 0.30**; the variant is
+  recorded, not shipped. A jump to 0.70 was not run: it would have
+  cost 8/55 golden top-1 hits in the full run's score distribution.
+- Why threshold tuning cannot fix refusal here: the graph refuses
+  on empty chunks (see `agent_service.py`, reasoning node), and
+  out-of-corpus probes still retrieve topically related chunks above
+  0.50, so the LLM answers from them instead of refusing. A real
+  refusal improvement needs a grade-based refusal (refuse when the
+  grade is poor even with chunks present) -- a behaviour change
+  needing design and tests, recorded as future work, not a knob
+  turned on this data.
+- Injection: inj-04 failed in both 0.30 runs and passed in the 0.50
+  variant; with n=6 that single flip is not evidence the threshold
+  caused it.
+- Latency p95s in the full and variant runs (78s, 182s) are inflated
+  by free-tier 503/timeout retries (the runner retries transient
+  429/503s with 60/90/120s backoff, and that wait is inside the
+  recorded question latency), not by normal answering speed (p50
+  10-13s).
+- The `--no-mmr` and grade-threshold variants were **not run**: on a
+  10-document corpus MMR has little room to matter, and free-tier
+  quota is better spent on the refusal question above than on
+  variants with no predicted signal. They are not claimed as tested.
+
+To run a live evaluation (maintainer, with a provider key that has
+quota for ~77 questions x planner/reasoning/judge calls -- use
+`--limit` first):
 
 ```bash
 cd backend
 OPENAI_API_KEY=sk-... python eval/run_eval.py --mode live --limit 20
 ```
 
-Full run without `--limit` once the capped run looks sane. Outputs go
-to a new `docs/eval/<run-id>/` directory and must be committed with
-their run id. Only then may README numbers be updated from them, with
-the date, model names, corpus size, and the exact command recorded
-alongside.
+Outputs go to a new `docs/eval/<run-id>/` directory and must be
+committed with their run id. Only then may README numbers be updated
+from them, with the date, model names, corpus size, and the exact
+command recorded alongside.
 
 ## Hybrid search / reranker experiment (not yet run)
 
