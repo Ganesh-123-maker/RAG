@@ -11,7 +11,6 @@ recorded with ``judge_error`` and excluded from the judged aggregate
 from __future__ import annotations
 
 import json
-
 import os
 
 # When the agent runs against an OpenAI-compatible endpoint (LLM_BASE_URL

@@ -224,6 +224,7 @@ async def run_evaluation(cfg: dict) -> dict:
     def _checkpoint(record: dict) -> None:
         with _checkpoint_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
+
     async with factory() as session:
         session.add(
             User(
@@ -286,7 +287,7 @@ async def run_evaluation(cfg: dict) -> dict:
                 try:
                     answer_obj = await agent.run(question, owner_id, history=[])
                     break
-                except Exception as exc:  # noqa: BLE001 -- retry only 429s
+                except Exception as exc:
                     last_exc = exc
                     text = str(exc)
                     if "429" not in text and "temporarily unavailable" not in text:
