@@ -74,6 +74,17 @@ class Settings(BaseSettings):
     # tuned optimum -- Phase D must measure grade thresholds before
     # claiming any of them is tuned.
     RETRIEVAL_GRADE_THRESHOLD: float = 0.50
+    # Grade-based refusal (2026-10-26): retrieval is also graded on
+    # lexical coverage -- the fraction of the ORIGINAL question's
+    # content tokens that appear in the retrieved chunk texts. Measured
+    # on the eval corpus (real Gemini retrieval, chunk level, with
+    # the implementation's own tokenizer): golden questions min 0.75
+    # / median 1.00, unanswerable probes that the live run answered
+    # all 0.00, so 0.50 sits in a real measured gap
+    # (see docs/EVALUATION.md). Two probes with in-corpus vocabulary
+    # (0.80, 1.00) still pass coverage and are refused downstream by
+    # reasoning/verify, as before -- coverage is a floor, not a proof.
+    RETRIEVAL_COVERAGE_THRESHOLD: float = 0.50
     RETRIEVAL_FETCH_K: int = 20
     MMR_LAMBDA: float = 0.7
     # Generation budgets (Phase B): context is truncated lowest-score
@@ -114,7 +125,10 @@ class Settings(BaseSettings):
         return v
 
     @field_validator(
-        "RETRIEVAL_SIMILARITY_THRESHOLD", "RETRIEVAL_GRADE_THRESHOLD", "MMR_LAMBDA"
+        "RETRIEVAL_SIMILARITY_THRESHOLD",
+        "RETRIEVAL_GRADE_THRESHOLD",
+        "RETRIEVAL_COVERAGE_THRESHOLD",
+        "MMR_LAMBDA",
     )
     @classmethod
     def _validate_unit(cls, v: float) -> float:

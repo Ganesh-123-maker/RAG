@@ -153,12 +153,19 @@ _BAD_ANSWER = "Zebra stripes are colourful.\n\nCITATIONS:\n[c-good] facts.txt, c
 
 @pytest.mark.asyncio
 async def test_grade_node_branches() -> None:
-    base = {"chunks": [], "errors": []}
+    # Grade now requires score AND coverage of the original question,
+    # so the cases carry a question and chunk text (see
+    # test_grade_refusal.py for the coverage branches).
+    base = {"chunks": [], "errors": [], "question": "What is the capital?"}
     poor_empty = await grade_retrieval_node({**base, "chunks": []})  # type: ignore[arg-type]
     assert poor_empty["retrieval_grade"] == "poor"
-    poor_low = await grade_retrieval_node({**base, "chunks": [{"score": 0.35}]})  # type: ignore[arg-type]
+    poor_low = await grade_retrieval_node(
+        {**base, "chunks": [{"score": 0.35, "text": "Paris is the capital of France."}]}  # type: ignore[arg-type]
+    )
     assert poor_low["retrieval_grade"] == "poor"
-    good = await grade_retrieval_node({**base, "chunks": [{"score": 0.95}]})  # type: ignore[arg-type]
+    good = await grade_retrieval_node(
+        {**base, "chunks": [{"score": 0.95, "text": "Paris is the capital of France."}]}  # type: ignore[arg-type]
+    )
     assert good["retrieval_grade"] == "good"
 
 
@@ -198,13 +205,19 @@ async def test_poor_retrieval_rewrite_retry_then_good() -> None:
 
 
 @pytest.mark.asyncio
-async def test_poor_after_retry_proceeds_with_what_was_retrieved() -> None:
+async def test_poor_after_retry_refuses_without_reasoning() -> None:
+    # Behaviour changed by grade-based refusal (2026-10-26): a still-
+    # poor grade after the single rewrite goes to the refuse node,
+    # not to reasoning. The old name asserted the previous behaviour.
     fake = _FakeLLM(_PLAN_RETRIEVE, _REWRITE, [_LOW_ANSWER])
     final = await _run_graph(fake, [[_LOW_CHUNK()], [_LOW_CHUNK()]])
     assert fake.rewrite_calls == 1  # exactly one retry, never a second
     assert final["retries"] == 1
     assert final["retrieval_grade"] == "poor"
-    assert final["answer"] == "Paris is the capital."
+    assert final["answer"] == "I couldn't find relevant information in your documents."
+    assert final["citations"] == []
+    assert final["verify_result"] == "skipped"
+    assert fake.reasoning_calls == 0
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,7 @@ and these windows are applied here, so both endpoints behave identically.
 
 import asyncio
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from typing import Any, NotRequired, TypedDict, cast
@@ -316,22 +317,141 @@ def _emit_status(state: AgentState, status: str) -> None:
             logger.debug("Status sink failed", exc_info=True)
 
 
-async def grade_retrieval_node(state: AgentState) -> dict:
-    """Score-based retrieval grade (deterministic, no LLM call).
+# Stopwords for the coverage grade: question words that carry no topic
+# signal. Kept deliberately small -- over-aggressive stoplists would
+# let a probe pass by matching only generic words.
+_COVERAGE_STOPWORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "how",
+        "what",
+        "why",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "that",
+        "this",
+        "these",
+        "those",
+        "it",
+        "its",
+        "in",
+        "on",
+        "of",
+        "to",
+        "for",
+        "with",
+        "by",
+        "from",
+        "as",
+        "at",
+        "or",
+        "and",
+        "but",
+        "not",
+        "no",
+        "i",
+        "you",
+        "he",
+        "she",
+        "we",
+        "they",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "my",
+        "your",
+        "his",
+        "our",
+        "their",
+        "explain",
+        "tell",
+        "give",
+        "show",
+        "describe",
+        "detail",
+    ]
+)
 
-    "good" requires at least one chunk and a top score at or above
-    ``RETRIEVAL_GRADE_THRESHOLD``. Search already drops chunks below
+
+def _normalize_token(tok: str) -> str:
+    """Cheap plural/gerund folding so "layers" and "layering" both
+    become "layer". Applied to BOTH sides (question and chunks), so a
+    match never depends on which side carried the suffix. No stemming
+    library: this must stay deterministic and dependency-free."""
+    if len(tok) > 5 and tok.endswith("ing"):
+        return tok[:-3]
+    if len(tok) > 3 and tok.endswith("s"):
+        return tok[:-1]
+    return tok
+
+
+def _coverage_tokens(text: str) -> set[str]:
+    """Content tokens of a text: lowercase alphanumerics, normalized,
+    minus stopwords and tokens shorter than 3 chars (numbers like
+    years survive: they are real topic signal, e.g. "2024")."""
+    return {
+        _normalize_token(tok)
+        for tok in re.findall(r"[a-z0-9]+", text.lower())
+        if tok not in _COVERAGE_STOPWORDS and len(tok) >= 3
+    }
+
+
+def chunk_coverage(question: str, chunks: list[dict]) -> float:
+    """Fraction of the question's content tokens appearing anywhere in
+    the retrieved chunk texts (union, not per-chunk average: evidence
+    may be split across chunks). 0.0 when the question has no content
+    tokens -- a content-free question cannot be grounded, so it grades
+    poor rather than passing vacuously."""
+    question_tokens = _coverage_tokens(question)
+    if not question_tokens:
+        return 0.0
+    chunk_tokens: set[str] = set()
+    for chunk in chunks:
+        chunk_tokens |= _coverage_tokens(str(chunk.get("text", "")))
+    hits = sum(1 for tok in question_tokens if tok in chunk_tokens)
+    return hits / len(question_tokens)
+
+
+async def grade_retrieval_node(state: AgentState) -> dict:
+    """Score + coverage retrieval grade (deterministic, no LLM call).
+
+    "good" requires all three: at least one chunk, a top score at or
+    above ``RETRIEVAL_GRADE_THRESHOLD``, AND coverage of the ORIGINAL
+    question at or above ``RETRIEVAL_COVERAGE_THRESHOLD``. Coverage is
+    measured against ``state["question"]``, never the rewritten query:
+    after a rewrite the query's tokens are the rewriter's, not the
+    user's, and grading against them would let a rewrite launder a
+    probe into a pass. Search already drops chunks below
     ``RETRIEVAL_SIMILARITY_THRESHOLD`` (0.30), so the grade threshold
-    (0.50 by default) is the stricter bar that decides whether a rewrite
-    is worth one retry: 0.30-0.50 retrievals are weak-but-not-empty and
-    trigger exactly one rewrite. Both thresholds are unmeasured starting
-    points -- Phase D must measure them (see docs/phase-c-report.md).
-    No LLM relevance grading is used: it would add cost, latency, and
-    a non-deterministic grade that graph tests could not pin down.
+    (0.50) is the stricter score bar; coverage is the second bar that
+    score alone could not provide -- the 0.50 score variant did not
+    improve refusal because out-of-corpus probes still retrieve
+    topically related chunks above 0.50. No LLM relevance grading is
+    used: it would add cost, latency, and a non-deterministic grade
+    that graph tests could not pin down.
     """
     _emit_status(state, "grading")
     chunks = state.get("chunks") or []
-    threshold = settings.RETRIEVAL_GRADE_THRESHOLD
+    score_threshold = settings.RETRIEVAL_GRADE_THRESHOLD
+    coverage_threshold = settings.RETRIEVAL_COVERAGE_THRESHOLD
     if not chunks:
         return {
             **state,
@@ -339,16 +459,45 @@ async def grade_retrieval_node(state: AgentState) -> dict:
             "grade_reason": "no chunks retrieved",
         }
     top = max(float(c.get("score", 0.0)) for c in chunks)
-    if top < threshold:
+    coverage = chunk_coverage(str(state.get("question", "")), chunks)
+    failures = []
+    if top < score_threshold:
+        failures.append(
+            f"top score {top:.3f} below grade threshold {score_threshold:.2f}"
+        )
+    if coverage < coverage_threshold:
+        failures.append(
+            f"coverage {coverage:.2f} below coverage threshold {coverage_threshold:.2f}"
+        )
+    if failures:
         return {
             **state,
             "retrieval_grade": "poor",
-            "grade_reason": f"top score {top:.3f} below grade threshold {threshold:.2f}",
+            "grade_reason": "; ".join(failures),
         }
     return {
         **state,
         "retrieval_grade": "good",
-        "grade_reason": f"top score {top:.3f} meets grade threshold {threshold:.2f}",
+        "grade_reason": (
+            f"top score {top:.3f} meets grade threshold {score_threshold:.2f}; "
+            f"coverage {coverage:.2f} meets coverage threshold {coverage_threshold:.2f}"
+        ),
+    }
+
+
+async def refuse_node(state: AgentState) -> dict:
+    """Shared refusal, reached when retrieval is still poor after the
+    single rewrite. Bypasses reasoning entirely: no LLM call, no
+    chance for the model to answer from pretraining. verify_node
+    would skip this answer anyway (it makes no document claims), so
+    the edge goes straight to response, which renders it with no
+    citations."""
+    _emit_status(state, "refusing")
+    return {
+        **state,
+        "answer": REFUSAL_TEXT,
+        "citations": [],
+        "verify_result": "skipped",
     }
 
 
@@ -716,17 +865,21 @@ should_route = should_retrieve
 
 
 def should_retry(state: AgentState) -> str:
-    """Grade routing: rewrite once on a poor grade, then proceed.
+    """Grade routing: rewrite once on a poor grade, then refuse.
 
     The ``retries`` cap is the termination guarantee: after one rewrite
-    + re-retrieval + re-grade, this returns 'reasoning' even if the
-    grade is still poor, and reasoning refuses on empty chunks.
+    + re-retrieval + re-grade, a still-poor grade goes to the refuse
+    node instead of reasoning. Previously this returned 'reasoning'
+    even on a still-poor grade, which is exactly how out-of-corpus
+    probes got answered: the reasoning LLM answered from topically
+    related chunks that score alone could not reject. Reasoning still
+    runs for good grades only (plus the direct branch, which never
+    retrieves).
     """
-    if (
-        state.get("retrieval_grade") == "poor"
-        and int(state.get("retries") or 0) < MAX_RETRIEVAL_RETRIES
-    ):
-        return "rewrite"
+    if state.get("retrieval_grade") == "poor":
+        if int(state.get("retries") or 0) < MAX_RETRIEVAL_RETRIES:
+            return "rewrite"
+        return "refuse"
     return "reasoning"
 
 
@@ -768,6 +921,7 @@ def _build_graph():
     g.add_node("grade", _traced("grade", grade_retrieval_node))
     g.add_node("rewrite", _traced("rewrite", rewrite_query_node))
     g.add_node("reasoning", _traced("reasoning", reasoning_node))
+    g.add_node("refuse", _traced("refuse", refuse_node))
     g.add_node("verify", _traced("verify", verify_node))
     g.add_node("direct", _traced("direct", direct_answer_node))
     g.add_node("response", _traced("response", response_node))
@@ -781,9 +935,10 @@ def _build_graph():
     g.add_conditional_edges(
         "grade",
         should_retry,
-        {"rewrite": "rewrite", "reasoning": "reasoning"},
+        {"rewrite": "rewrite", "reasoning": "reasoning", "refuse": "refuse"},
     )
     g.add_edge("rewrite", "retriever")
+    g.add_edge("refuse", "response")
     g.add_edge("reasoning", "verify")
     g.add_conditional_edges(
         "verify",
