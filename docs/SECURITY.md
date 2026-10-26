@@ -88,11 +88,16 @@
   HTML in an answer is not executed.
 - Security headers (`next.config.js`): `X-Content-Type-Options:
   nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy:
-  strict-origin-when-cross-origin`, and a CSP (`default-src 'self'`,
-  style `unsafe-inline` only -- required by Tailwind-injected
-  styles; no script `unsafe-inline`/`unsafe-eval` for app code, but
-  see the Phase F note: CSP allows `'unsafe-inline'` scripts for
-  Next.js hydration; a nonce-based CSP is a follow-up, not done).
+  strict-origin-when-cross-origin`, and a nonce CSP
+  (`frontend/middleware.ts`): each request gets a fresh random nonce,
+  Next.js stamps its inline scripts with it via the `x-nonce`
+  request header, and `script-src` allows only `'self'` plus that
+  nonce -- no script `unsafe-inline`/`unsafe-eval` anywhere. Pages
+  are `force-dynamic` because statically prerendered pages are baked
+  before any request nonce exists, so their inline scripts would
+  ship nonce-less and be blocked (verified by header inspection and
+  the Playwright journey). Style `unsafe-inline` remains, required
+  by Tailwind-injected styles.
 - Errors to clients are typed and safe: ingestion failures return
   422/502/500 with a safe message, never raw exception text (a
   sentinel-string test proves this); full errors are logged
@@ -147,8 +152,6 @@ above, before any public deploy.
 
 ## What is still open (security follow-ups)
 
-- Nonce-based CSP (replacing the hydration `'unsafe-inline'`).
-- Refresh-token flow (replacing single-token logout revocation).
 - Redis-backed rate limits / denylist / quotas for multi-instance
   deployments (current ones are single-instance).
 - Dependency upgrade + retest (see pip-audit accepted risk above).

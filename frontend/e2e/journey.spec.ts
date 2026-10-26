@@ -37,6 +37,45 @@ test("signup -> upload -> ask -> cited answer", async ({ page }) => {
   await page.route("**/api/v1/chat/stream", (route) =>
     route.fulfill({ status: 200, contentType: "text/event-stream", body: SSE })
   );
+  // The stream's done event sets conversationId=conv-e2e, which makes
+  // ChatPanel fetch the conversation history. That GET is unmocked in
+  // both modes (the mocked stream never persisted anything), so
+  // without this route it hits the real backend, 401s, and the
+  // refresh interceptor redirects to /login mid-test. Mock it with
+  // the same user question + cited answer the stream produced.
+  await page.route("**/api/v1/chat/conversations/conv-e2e", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        id: "conv-e2e",
+        messages: [
+          {
+            id: "m1",
+            role: "user",
+            content: "What does the handbook say about safety?",
+            citations: [],
+          },
+          {
+            id: "m2",
+            role: "assistant",
+            content: "The handbook says safety first.",
+            citations: [
+              {
+                document_id: "doc-e2e",
+                document_name: "handbook.pdf",
+                chunk_index: 1,
+                score: 0.92,
+                snippet: "safety first",
+                chunk_id: "chunk-e2e",
+                page: 2,
+                section: "Safety",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  );
 
   await page.goto("/register");
   // Wait for hydration: in dev mode a submit click before React

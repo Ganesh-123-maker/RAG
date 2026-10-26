@@ -16,18 +16,13 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: "",
   },
 
-  // Phase E security headers, corrected in Phase F (see below).
-  // Phase F fix: the Phase E CSP ("default-src 'self'" with no
-  // script-src) blocked Next.js's own inline scripts, so hydration
-  // never completed in dev OR production and every form submitted
-  // natively instead of through React (proven by Playwright: the
-  // register form landed on "/register?" with no API call). Next.js
-  // requires inline scripts for hydration unless a nonce is plumbed
-  // through middleware, so script-src now allows 'unsafe-inline'
-  // (but NOT 'unsafe-eval'). A nonce-based CSP is the Phase G
-  // follow-up; do not silently widen this further. Google Fonts
-  // are also allowed explicitly: globals.css already @imports
-  // them, and the old CSP silently fell back to system fonts.
+  // Security headers. CSP itself lives in middleware.ts, which
+  // generates a per-request nonce: a static CSP here would be
+  // enforced *in addition* to the middleware one, and its lack of
+  // the nonce would block Next.js hydration scripts again (the
+  // Phase F failure mode). Google Fonts are allowed explicitly:
+  // globals.css already @imports them, and a CSP without them
+  // silently fell back to system fonts.
   async headers() {
     return [
       {
@@ -36,11 +31,6 @@ const nextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          {
-            key: "Content-Security-Policy",
-            value:
-              "default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'",
-          },
         ],
       },
     ];
