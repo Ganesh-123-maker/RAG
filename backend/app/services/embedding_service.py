@@ -22,6 +22,7 @@ MAX_EMBEDDING_BATCH = 100
 OPENAI_TIMEOUT_SECONDS = 30.0
 
 _client: AsyncOpenAI | None = None
+_embedding_client: AsyncOpenAI | None = None
 
 
 def get_openai_client() -> AsyncOpenAI:
@@ -29,10 +30,29 @@ def get_openai_client() -> AsyncOpenAI:
     if _client is None:
         _client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
+            base_url=settings.LLM_BASE_URL,
             timeout=OPENAI_TIMEOUT_SECONDS,
             max_retries=0,
         )
     return _client
+
+
+def get_embedding_client() -> AsyncOpenAI:
+    """Client for embeddings, which may be a different provider than chat.
+
+    Unset EMBEDDING_BASE_URL/EMBEDDING_API_KEY means: same client as chat.
+    """
+    global _embedding_client
+    if settings.EMBEDDING_BASE_URL is None and settings.EMBEDDING_API_KEY is None:
+        return get_openai_client()
+    if _embedding_client is None:
+        _embedding_client = AsyncOpenAI(
+            api_key=settings.EMBEDDING_API_KEY or settings.OPENAI_API_KEY,
+            base_url=settings.EMBEDDING_BASE_URL or settings.LLM_BASE_URL,
+            timeout=OPENAI_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+    return _embedding_client
 
 
 class EmbeddingError(Exception):
@@ -47,7 +67,7 @@ class EmbeddingError(Exception):
 
 class EmbeddingService:
     def __init__(self) -> None:
-        self._client = get_openai_client()
+        self._client = get_embedding_client()
         self._model = settings.OPENAI_EMBEDDING_MODEL
         self._dimensions = settings.OPENAI_EMBEDDING_DIMENSIONS
 

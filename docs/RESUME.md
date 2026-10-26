@@ -4,11 +4,12 @@ Every number below is verified: backend/frontend test counts and
 coverage are from Phase G runs on the phase-g branch (see
 `docs/phase-g-report.md`); corpus/golden counts are from
 `backend/eval/`; offline smoke numbers are labelled as pipeline
-smoke only. **Live evaluation has not been run** (blocked on a valid
-`OPENAI_API_KEY`), so no live accuracy, latency, or cost number
-appears here. If an interviewer asks for one, say it is pending --
-that is the honest answer, and the eval harness to run it is already
-built.
+smoke only. **Live evaluation has now been run on Gemini free tier**
+(chat `gemini-3.5-flash-lite`, embeddings `gemini-embedding-001`),
+because the connected OpenAI account returned
+`credit_balance_exhausted` -- so live numbers below are Gemini
+numbers, never OpenAI/GPT-4o numbers. Full runs:
+`docs/eval/gemini-live-full/` and `docs/EVALUATION.md`.
 
 ## Resume bullets (pick 5-6)
 
@@ -29,9 +30,11 @@ built.
 4. Built a real evaluation harness from scratch (10 self-written
    documents, 55 golden questions, 16 unanswerable probes, 6
    prompt-injection probes) after deleting a simulated benchmark
-   that fabricated its scores; ran offline pipeline smoke runs
-   and documented, honestly, that live quality measurement is
-   pending a valid API key.
+   that fabricated its scores; ran it live on Gemini free tier
+   (full run: hit@1/3/5 1.0, citation precision 0.9623,
+   faithfulness 0.9636, refusal 0.6875, injection pass 0.8333,
+   judge 52/54) and tested a threshold change (0.30 -> 0.50) that
+   did not improve refusal, so the default was kept on evidence.
 5. Shipped production hardening: httpOnly auth cookies with logout
    revocation, owner-scoped repositories and vector filters, rate
    limits and login lockout, circuit breaker, structured logging
@@ -68,7 +71,8 @@ built.
   Planner (LLM JSON plan, fail-open to retrieval, direct-answer
   branch); retriever (embed + owner-filtered, thresholded, MMR
   search); grade (score-based, no LLM); rewrite (one retry);
-  reasoning (GPT-4o, delimited context marked as data); verify
+  reasoning (configured chat model -- Gemini in the live runs,
+  delimited context marked as data); verify
   (cited ids were retrieved + token overlap, one regenerate,
   then refuse); response (parse + validate citations).
 - **How is hallucination controlled?** Three layers, none of
@@ -86,8 +90,11 @@ built.
   fallback vector); Qdrant failure trips a circuit breaker
   (3 failures, 60s cooldown); agent failures surface as a safe
   502, never raw exception text.
-- **What are the limitations?** Live quality unmeasured; thresholds
-  untuned; verify is overlap, not faithfulness; rate limits and
+- **What are the limitations?** Live quality measured on Gemini
+  free tier only, on a 10-document corpus; refusal is the weak
+  metric (0.6875) and similarity 0.30 was kept after a 0.50 variant
+  failed to improve it; other thresholds untuned; verify is
+  overlap, not faithfulness; rate limits and
   quotas are single-instance/in-memory; refresh tokens deferred;
   daily token budget is an estimate; mypy has 14 pre-existing
   errors; pip-audit has 71 records (documented accepted risk,
@@ -100,7 +107,8 @@ built.
 ## What NOT to claim
 
 - Any live accuracy, groundedness, hallucination, latency, or
-  cost number (never measured).
+  cost number from a provider other than the one that ran it
+  (live numbers are Gemini free-tier numbers, not OpenAI).
 - Offline smoke scores (e.g. hit@5 0.3636 / 0.9818) as system
   quality -- they are fake-embedding artifacts.
 - 97% coverage, 100% grounded, 0% hallucination, <1.5s latency,

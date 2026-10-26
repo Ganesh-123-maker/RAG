@@ -19,6 +19,21 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
     OPENAI_EMBEDDING_DIMENSIONS: int = 3072
     OPENAI_CHAT_MODEL: str = "gpt-4o"
+    # Optional OpenAI-compatible endpoint override. Unset (default) means
+    # the real OpenAI API. Set to a provider's OpenAI-compatible base URL
+    # (e.g. Gemini's https://generativelanguage.googleapis.com/v1beta/openai/
+    # or Groq's https://api.groq.com/openai/v1) to run the same code
+    # against that provider, with its own key in OPENAI_API_KEY and its
+    # own model names in the settings above. This is how the live
+    # evaluation runs on free-tier providers; the production default
+    # is unchanged.
+    LLM_BASE_URL: str | None = None
+    # Optional separate embeddings provider. Unset means embeddings use
+    # the same client/key/endpoint as chat. Set both when chat and
+    # embeddings come from different free providers (e.g. Groq for chat,
+    # OpenRouter for embeddings, since Groq has no embeddings API).
+    EMBEDDING_BASE_URL: str | None = None
+    EMBEDDING_API_KEY: str | None = None
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./ragdb.sqlite"
     POSTGRES_HOST: str = "postgres"

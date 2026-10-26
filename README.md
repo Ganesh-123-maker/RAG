@@ -51,7 +51,7 @@
 - **Dedupe** — Content hash per owner: re-uploading the same file is detected, and duplicate chunks within a document are not re-indexed.
 - **Embeddings** — OpenAI `text-embedding-3-large` (3072 dimensions by default, configurable and validated; a collection-dimension mismatch is detected at startup). Embedding failures raise a typed error and mark the document `error` -- there is deliberately **no fallback vector**: a silently substituted vector would corrupt retrieval.
 - **One LangGraph pipeline for chat and streaming** — `planner → retriever → grade → [rewrite + retry once] → reasoning → verify → [regenerate once] → response`, with a direct-answer branch for chit-chat. Both `POST /api/v1/chat` and `POST /api/v1/chat/stream` run this same graph with the same prompt, history window, and citation semantics. Streaming yields structured SSE events: `status`, `token`, `citations`, `done`, `error`; the assistant message is persisted even if the client disconnects.
-- **Retrieval** — Dense Qdrant search (cosine) with an `owner_id` payload filter, a configurable similarity threshold (default 0.30, an unmeasured starting default -- see Limitations), fetch-k 20 with MMR selection (λ 0.7) down to top-k 5, and a shared empty/low-confidence refusal path. Hybrid search and a reranker were deliberately **not** added: Phase D found no live data to justify them (see `docs/EVALUATION.md`).
+- **Retrieval** — Dense Qdrant search (cosine) with an `owner_id` payload filter, a configurable similarity threshold (default 0.30, tested against 0.50 on live data and kept -- see Evaluation), fetch-k 20 with MMR selection (λ 0.7) down to top-k 5, and a shared empty/low-confidence refusal path. Hybrid search and a reranker were deliberately **not** added: live retrieval is already 1.0 on this corpus, so there is no measured gap for them to close (see `docs/EVALUATION.md`).
 - **Grounded prompting and chunk-id citations** — Context blocks are delimited and marked as data, not instructions. Citations reference chunk ids (not positions) and are validated: only chunks actually retrieved and cited by the model are shown, with page/section and snippet, in a clickable source panel in the UI.
 - **Conversation memory** — PostgreSQL message history, bounded by a token budget (context 6000 tokens, history 2000 tokens, chat output capped at 1000 tokens). This is history, not semantic long-term memory.
 - **Background ingestion** — Uploads queue (queued → processing → ready/error) with progress, retry on embedding failure (max 2 attempts), and a worker (`backend/scripts/run_ingestion_worker.py`) plus an orphan-reconciliation script.
@@ -223,44 +223,48 @@ E2E_RUN=1 E2E_MOCK_API=1 npx playwright test   # needs the prod server up (see f
 
 ## 📊 Evaluation
 
-**Live evaluation is BLOCKED pending a valid `OPENAI_API_KEY`.** It has
-never been run, and no live quality number (accuracy, groundedness,
-latency, cost) is claimed anywhere in this README.
-
-What exists, and what it does and does not prove:
+**Live evaluation has now been run — on Gemini free tier, not
+OpenAI.** The connected OpenAI account returned
+`credit_balance_exhausted`, so the live runs used Gemini's
+OpenAI-compatible endpoint (chat `gemini-3.5-flash-lite`, embeddings
+`gemini-embedding-001`, 3072 dims) at $0 cost. Every number below
+measures that configuration and must never be quoted as an OpenAI /
+GPT-4o result. Full discussion, run outputs, and the tuning decision:
+`docs/EVALUATION.md`.
 
 - **Corpus:** 10 self-written documents (`backend/eval/corpus/`, TXT /
   MD / PDF / DOCX), 55 golden questions, 16 unanswerable probes,
   6 prompt-injection probes. See `backend/eval/README.md`.
-- **Runner:** `backend/eval/run_eval.py`. `--mode offline` uses fake
-  hashed bag-of-words embeddings and a fake LLM that copies the best
-  overlapping chunk. It proves the pipeline runs end to end
-  (ingest → retrieve → graph → metrics → output). **It is NOT a
-  quality measurement and its scores must never be quoted as system
-  quality.**
+- **Full live run** (`docs/eval/gemini-live-full/`, 55 golden):
+  hit@1 = 1.0, hit@3 = 1.0, hit@5 = 1.0, MRR = 1.0; citation
+  precision 0.9623; faithfulness 0.9636; refusal accuracy 0.6875
+  (11/16); injection pass 0.8333 (5/6); LLM judge 52/54 correct;
+  latency p50 10.0s, p95 78.5s (p95 inflated by free-tier 503
+  retries, not normal answering speed).
+- **Capped live run** (`docs/eval/gemini-live-limit20/`, 20 golden):
+  hit@1/3/5 = 1.0, citation precision 1.0, faithfulness 0.9833,
+  refusal 0.5625 (9/16), injection 0.8333 (5/6), judge 20/20.
+- **Honest limits:** the corpus is small and the golden questions
+  were written against it, so perfect retrieval proves the pipeline
+  end to end, not general quality on a large corpus. **Refusal is
+  the weak metric** (0.50–0.6875 across runs) and it wobbles run to
+  run on identical probes. Raising the similarity threshold 0.30 →
+  0.50 was tested (`docs/eval/gemini-live-limit20-threshold050/`) and
+  did **not** improve refusal (8/16 vs 9/16), so the production
+  default stays at 0.30; a grade-based refusal is the identified
+  future fix, not a shipped change.
 - **Offline smoke results (labelled as such):** `docs/eval/offline-smoke-1/`
   (current config, threshold 0.30) and
   `docs/eval/offline-smoke-threshold-off/` (threshold 0.0). The
   current-config hit@5 of 0.3636 is a **fake-embedding artifact**
   (hashed cosines typically fall below 0.30), not evidence about the
-  real threshold; the threshold-off run's refusal accuracy of 0.5625
-  (vs 1.0 with the threshold) shows the threshold's real function in
-  this pipeline. Full discussion: `docs/EVALUATION.md`,
-  `docs/phase-d-report.md`.
-- **To run the real evaluation** (once a key with quota is available):
+  real threshold. Offline scores must never be quoted as system
+  quality.
 
-```bash
-cd backend
-OPENAI_API_KEY=sk-... python eval/run_eval.py --mode live --limit 20
-```
-
-Full run without `--limit` once the capped run looks sane. Outputs go
-to a new `docs/eval/<run-id>/` directory and must be committed with
-their run id; only then may README numbers be updated from them.
-
-Hybrid search and a reranker are **not implemented**, because Phase D
-had no live data to show a gain; the experiment to run first is
-documented in `docs/EVALUATION.md`.
+Hybrid search and a reranker are **not implemented**: with retrieval
+already at 1.0 on this corpus there is no measured gap for them to
+close; the experiment to run first on a larger corpus is documented
+in `docs/EVALUATION.md`.
 
 ---
 
@@ -317,8 +321,8 @@ Qdrant Cloud free tier.
 
 ## ⚠️ Limitations
 
-- **Live quality is unmeasured.** No accuracy, groundedness, hallucination, latency, or cost number is known until the live eval runs.
-- **Thresholds are starting defaults, not tuned optima:** similarity 0.30, grade 0.50, MMR λ 0.7, fetch-k 20. Do not claim they are tuned.
+- **Live quality is measured on Gemini free tier only** (see Evaluation), on a 10-document corpus. No OpenAI/GPT-4o number is claimed, and no large-corpus quality is claimed.
+- **Thresholds are measured, not tuned optima:** similarity 0.30 was tested against 0.50 on live data and kept (0.50 did not improve refusal); grade 0.50, MMR λ 0.7, and fetch-k 20 remain untested defaults. Do not claim they are tuned.
 - **Verify is overlap-based, not LLM faithfulness:** `verify_node` checks cited chunk ids were retrieved and share substantive tokens with the answer. It catches unsupported citations, not subtle hallucinations.
 - **Single-instance limits:** rate limits, quotas, token denylist, metrics, and the ingestion worker are in-memory/single-instance and do not survive restart (except the DB queue) or span replicas.
 - **Refresh tokens deferred:** logout revokes only the current token, in this process. Daily token budget is an estimate (chars/4), not metered usage.

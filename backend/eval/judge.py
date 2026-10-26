@@ -11,8 +11,17 @@ recorded with ``judge_error`` and excluded from the judged aggregate
 from __future__ import annotations
 
 import json
+import os
 
-JUDGE_MODEL = "gpt-4o"
+# When the agent runs against an OpenAI-compatible endpoint (LLM_BASE_URL
+# set, e.g. Gemini), the judge must use that provider's chat model, not
+# gpt-4o, or the judge call 404s on the compatible endpoint. Otherwise
+# the judge stays on gpt-4o.
+JUDGE_MODEL = (
+    os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
+    if os.environ.get("LLM_BASE_URL")
+    else "gpt-4o"
+)
 JUDGE_TEMPERATURE = 0.0
 
 JUDGE_SYSTEM_PROMPT = (

@@ -201,6 +201,30 @@ async def run_evaluation(cfg: dict) -> dict:
     owner_id = uuid.uuid4()
     doc_id_by_file: dict[str, str] = {}
     records: list[dict] = []
+    # Checkpoint every record as it completes, so a mid-run crash
+    # (e.g. a free-tier daily cap) does not lose completed questions.
+    # The final results.jsonl is still written at the end on success.
+    # With --resume, reuse the crashed run's directory and skip the
+    # questions already checkpointed there.
+    _resume_dir = Path(cfg["out_dir"]) / cfg["run_id"]
+    if cfg.get("resume") and _resume_dir.exists():
+        _checkpoint_dir = _resume_dir
+    else:
+        _checkpoint_dir = _unique_run_dir(Path(cfg["out_dir"]), cfg["run_id"])
+    _checkpoint_path = _checkpoint_dir / "results-partial.jsonl"
+    _done: set[tuple[str, str]] = set()
+    if cfg.get("resume") and _checkpoint_path.exists():
+        for _line in _checkpoint_path.read_text(encoding="utf-8").splitlines():
+            if not _line.strip():
+                continue
+            _rec = json.loads(_line)
+            records.append(_rec)
+            _done.add((_rec["kind"], _rec["id"]))
+
+    def _checkpoint(record: dict) -> None:
+        with _checkpoint_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+
     async with factory() as session:
         session.add(
             User(
@@ -255,8 +279,28 @@ async def run_evaluation(cfg: dict) -> dict:
             retrieved = await vector_svc.search(
                 query_vector=query_vector, owner_id=owner_id
             )
-            answer_obj = await agent.run(question, owner_id, history=[])
+            # Free-tier pacing: a transient 429 (per-minute quota) must not
+            # kill the whole run. Retry the whole question with backoff,
+            # then re-raise if it still fails so the failure is visible.
+            last_exc: Exception | None = None
+            for attempt, delay in enumerate((60.0, 90.0, 120.0)):
+                try:
+                    answer_obj = await agent.run(question, owner_id, history=[])
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    text = str(exc)
+                    if "429" not in text and "temporarily unavailable" not in text:
+                        raise
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(delay)
+            else:  # pragma: no cover -- loop always breaks or raises
+                raise last_exc  # type: ignore[misc]
             latency = time.perf_counter() - t0
+            pace = float(cfg.get("pace_seconds") or 0)
+            if pace:
+                await asyncio.sleep(pace)
             return {
                 "retrieved": retrieved,
                 "answer": answer_obj.answer,
@@ -268,6 +312,24 @@ async def run_evaluation(cfg: dict) -> dict:
         retrieved_doc_lists: list[list[str]] = []
         golden_doc_ids: list[str] = []
         for item in golden:
+            if ("golden", item["id"]) in _done:
+                # Rebuild the hit@k/MRR inputs from the stored record.
+                # Only membership/position of the source doc matters for
+                # those metrics, so a synthesized list with the source doc
+                # at the recorded rank (or absent) reproduces them exactly,
+                # even though this run's document UUIDs differ.
+                _src = doc_id_by_file[item["source_document"]]
+                _rank = next(
+                    r["rank"]
+                    for r in records
+                    if r["kind"] == "golden" and r["id"] == item["id"]
+                )
+                _docs = [f"resumed-{i}" for i in range(20)]
+                if _rank is not None:
+                    _docs[_rank - 1] = _src
+                retrieved_doc_lists.append(_docs)
+                golden_doc_ids.append(_src)
+                continue
             result = await ask(item["question"])
             retrieved_ids = [c.document_id for c in result["retrieved"]]
             retrieved_doc_lists.append(retrieved_ids)
@@ -323,11 +385,18 @@ async def run_evaluation(cfg: dict) -> dict:
                     "input": in_tokens,
                     "output": out_tokens,
                 }
-                record["estimated_cost_usd"] = round(
-                    in_tokens * PRICING["gpt-4o-input"] / 1_000_000
-                    + out_tokens * PRICING["gpt-4o-output"] / 1_000_000,
-                    6,
-                )
+                # Free-tier providers via OpenAI-compatible endpoints cost
+                # $0; the gpt-4o pricing constants do not apply to them.
+                # Only a real OpenAI base URL (or no override) is priced.
+                _base = os.environ.get("LLM_BASE_URL", "")
+                if _base and "api.openai.com" not in _base:
+                    record["estimated_cost_usd"] = 0.0
+                else:
+                    record["estimated_cost_usd"] = round(
+                        in_tokens * PRICING["gpt-4o-input"] / 1_000_000
+                        + out_tokens * PRICING["gpt-4o-output"] / 1_000_000,
+                        6,
+                    )
             else:
                 record["judge"] = None
                 record["keyword_score"] = _metrics.keyword_score(
@@ -336,41 +405,46 @@ async def run_evaluation(cfg: dict) -> dict:
                 record["estimated_tokens"] = None
                 record["estimated_cost_usd"] = 0.0
             records.append(record)
+            _checkpoint(record)
 
         # --- Unanswerable probes.
         for item in unanswerable:
+            if ("unanswerable", item["id"]) in _done:
+                continue
             result = await ask(item["question"])
-            records.append(
-                {
-                    "kind": "unanswerable",
-                    "id": item["id"],
-                    "question": item["question"],
-                    "mode": mode_label,
-                    "answer": result["answer"],
-                    "citations": result["citations"],
-                    "refused": _metrics.is_refusal(result["answer"]),
-                    "latency_seconds": round(result["latency"], 4),
-                }
-            )
+            _rec = {
+                "kind": "unanswerable",
+                "id": item["id"],
+                "question": item["question"],
+                "mode": mode_label,
+                "answer": result["answer"],
+                "citations": result["citations"],
+                "refused": _metrics.is_refusal(result["answer"]),
+                "latency_seconds": round(result["latency"], 4),
+            }
+            records.append(_rec)
+            _checkpoint(_rec)
 
         # --- Prompt-injection probes.
         for item in injection:
+            if ("injection", item["id"]) in _done:
+                continue
             result = await ask(item["question"])
-            records.append(
-                {
-                    "kind": "injection",
-                    "id": item["id"],
-                    "question": item["question"],
-                    "mode": mode_label,
-                    "answer": result["answer"],
-                    "citations": result["citations"],
-                    "passed": _metrics.injection_pass(
-                        result["answer"], result["citations"], item["forbidden"]
-                    ),
-                    "forbidden": item["forbidden"],
-                    "latency_seconds": round(result["latency"], 4),
-                }
-            )
+            _rec = {
+                "kind": "injection",
+                "id": item["id"],
+                "question": item["question"],
+                "mode": mode_label,
+                "answer": result["answer"],
+                "citations": result["citations"],
+                "passed": _metrics.injection_pass(
+                    result["answer"], result["citations"], item["forbidden"]
+                ),
+                "forbidden": item["forbidden"],
+                "latency_seconds": round(result["latency"], 4),
+            }
+            records.append(_rec)
+            _checkpoint(_rec)
 
     await engine.dispose()
 
@@ -388,6 +462,19 @@ async def run_evaluation(cfg: dict) -> dict:
     ]
     summary: dict = {
         "mode": mode_label,
+        "provider": (
+            "groq-chat+openrouter-embeddings"
+            if "groq" in os.environ.get("LLM_BASE_URL", "")
+            and "openrouter" in os.environ.get("EMBEDDING_BASE_URL", "")
+            else "groq-chat+gemini-embeddings"
+            if "groq" in os.environ.get("LLM_BASE_URL", "")
+            and "generativelanguage" in os.environ.get("EMBEDDING_BASE_URL", "")
+            else "gemini-openai-compat"
+            if "generativelanguage" in os.environ.get("LLM_BASE_URL", "")
+            else "openai"
+            if not os.environ.get("LLM_BASE_URL")
+            else "openai-compat"
+        ),
         "variant": cfg.get("variant", "current-config"),
         "run_id": cfg["run_id"],
         "generated_at": datetime.now(UTC).isoformat(),
@@ -481,10 +568,36 @@ async def run_evaluation(cfg: dict) -> dict:
             "numbers prove the pipeline runs end to end; they are NOT a "
             "quality measurement of the real system."
             if mode == "offline"
-            else "LIVE MODE: real OpenAI embeddings, real graph LLM calls, "
-            "and LLM-as-judge at temperature 0 with a fixed rubric. "
-            "Token/cost figures are tiktoken-based estimates, not metered "
-            "API usage (the agent service does not return usage)."
+            else (
+                "LIVE MODE (Gemini free tier via its OpenAI-compatible "
+                "endpoint): real Gemini embeddings, real graph LLM calls, "
+                "and LLM-as-judge at temperature 0 with a fixed rubric. "
+                "Cost is $0 on the free tier, subject to its rate limits. "
+                "These numbers measure the Gemini configuration, NOT "
+                "OpenAI/gpt-4o, and must never be presented as OpenAI results."
+                if "generativelanguage" in os.environ.get("LLM_BASE_URL", "")
+                else "LIVE MODE (Groq chat + OpenRouter free embeddings via "
+                "OpenAI-compatible endpoints): real provider embeddings, "
+                "real graph LLM calls, and LLM-as-judge at temperature 0 "
+                "with a fixed rubric. Cost is $0 on the free tiers, "
+                "subject to their rate limits. These numbers measure this "
+                "provider configuration, NOT OpenAI/gpt-4o, and must never "
+                "be presented as OpenAI results."
+                if "groq" in os.environ.get("LLM_BASE_URL", "")
+                and "openrouter" in os.environ.get("EMBEDDING_BASE_URL", "")
+                else "LIVE MODE (Groq chat + Gemini free embeddings via "
+                "OpenAI-compatible endpoints): real provider embeddings, "
+                "real graph LLM calls, and LLM-as-judge at temperature 0 "
+                "with a fixed rubric. Cost is $0 on the free tiers, "
+                "subject to their rate limits. These numbers measure this "
+                "provider configuration, NOT OpenAI/gpt-4o, and must never "
+                "be presented as OpenAI results."
+                if "groq" in os.environ.get("LLM_BASE_URL", "")
+                else "LIVE MODE: real OpenAI embeddings, real graph LLM calls, "
+                "and LLM-as-judge at temperature 0 with a fixed rubric. "
+                "Token/cost figures are tiktoken-based estimates, not metered "
+                "API usage (the agent service does not return usage)."
+            )
         ),
     }
     if mode == "live":
@@ -511,7 +624,7 @@ async def run_evaluation(cfg: dict) -> dict:
         )
         summary["judge_correct_rate"] = None
 
-    out_dir = _unique_run_dir(Path(cfg["out_dir"]), cfg["run_id"])
+    out_dir = _checkpoint_dir
     (out_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
@@ -538,7 +651,8 @@ def main(argv: list[str] | None = None) -> int:
         "--mode",
         choices=["offline", "live"],
         required=True,
-        help="offline = pipeline smoke test only; live = real OpenAI calls",
+        help="offline = pipeline smoke test only; live = real provider calls "
+        "(OpenAI by default, or the LLM_BASE_URL provider, e.g. Gemini)",
     )
     parser.add_argument(
         "--limit",
@@ -556,7 +670,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-mmr", action="store_true", help="disable MMR selection for this run"
     )
+    parser.add_argument(
+        "--pace-seconds",
+        type=float,
+        default=0.0,
+        help="sleep after each question (free-tier rate-limit pacing)",
+    )
     parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse an existing run-id directory and skip questions "
+        "already in its results-partial.jsonl",
+    )
     parser.add_argument("--corpus-dir", default=None)
     parser.add_argument("--golden-dir", default=None)
     parser.add_argument("--out-dir", default=None)
@@ -576,10 +702,12 @@ def main(argv: list[str] | None = None) -> int:
         "db_path": str(tmp / "eval.sqlite"),
         "upload_dir": str(tmp / "uploads"),
         "limit": args.limit,
+        "pace_seconds": args.pace_seconds,
         "variant": args.variant,
         "threshold": args.threshold,
         "no_mmr": args.no_mmr,
         "run_id": run_id,
+        "resume": args.resume,
         "out_dir": args.out_dir or str(_BACKEND.parent / "docs" / "eval"),
     }
     summary = asyncio.run(run_evaluation(cfg))
