@@ -199,9 +199,9 @@ that matters here):
 | Playwright E2E (mock-API mode) | **1 passed** (signup → upload → ask → cited answer) |
 | Ruff `check` + `format --check` | clean |
 | mypy | **clean** (blocking CI job since 2026-10-26) |
-| Bandit | 11 Low, 0 Medium, 0 High |
-| pip-audit | 71 records (documented accepted risk, see `docs/SECURITY.md`) |
-| npm audit | CI first run: 15 vulnerabilities (3 moderate, 11 high, 1 critical), incl. Next.js 14.2.5 update; non-blocking CI job, see docs/SECURITY.md |
+| Bandit | 12 Low, 0 Medium, 0 High |
+| pip-audit | **3 records in 2 packages** after the 2026-10-26 upgrade (was 57 re-measured, 71 in Phase G); all 3 have no fixed release and are documented accepted risks, see `docs/SECURITY.md` |
+| npm audit | Not runnable in the sandbox (registry audit endpoint 403 by policy); no count claimed — verification is the non-blocking CI job, see docs/SECURITY.md |
 | Docker builds / compose smoke | **not run in this sandbox (no Docker)**; covered by CI jobs (`docker-build`, `compose-smoke`) |
 
 Run the backend suite:
@@ -277,14 +277,12 @@ Summary only; the full review, scan results, and accepted risks are in
   `owner_id` Qdrant filter, login lockout, rate limits, tightened CORS
   (production rejects `*`), security headers, sanitised Markdown
   rendering (no raw HTML execution, no `dangerouslySetInnerHTML`).
-- Scans are **not claimed clean**: bandit 11 Low / 0 Medium / 0 High;
-  pip-audit 71 records across pinned/transitive dependencies
-  (notably `python-jose`, `python-multipart`, `starlette` via FastAPI
-  0.111, and LangGraph transitive deps). They are a documented
-  accepted risk **only while the app has no public deployment**,
-  with a review note in `docs/SECURITY.md`; upgrading FastAPI /
-  LangGraph pins is a separate, fully-retested task and must happen
-  before any public deploy.
+- Scans are **not claimed clean**: bandit 12 Low / 0 Medium / 0 High;
+  pip-audit 3 records in 2 packages after the 2026-10-26 upgrade
+  (`python-jose`, `ecdsa` — no fixed release exists for either;
+  documented accepted risk **only while the app has no public
+  deployment**, with the unreachability reasoning in
+  `docs/SECURITY.md`). Re-check both before any public deploy.
 - Secrets come only from the environment. The dev-only JWT secret in
   code is refused in production; it is flagged by bandit as Low and
   documented there.
