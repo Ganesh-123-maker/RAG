@@ -315,7 +315,7 @@ Qdrant Cloud free tier.
 - [`docs/phase-a-report.md`](docs/phase-a-report.md) … [`docs/phase-g-report.md`](docs/phase-g-report.md) -- per-phase reports
 - [`CHANGELOG.md`](CHANGELOG.md), [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Demo seed: `backend/scripts/seed_demo.py` (needs a running stack; see its help text)
-- Demo screenshots/GIF: **TODO** -- not produced in the sandbox (no running stack to screenshot); exact steps are in `docs/phase-g-report.md`. No stock or fake screenshots are included.
+- Demo screenshots (real UI against a local stack, 2026-10-26; see `docs/manual-api-exercise.md` for the run): [login](docs/screenshots/01-login.png), [dashboard with a Ready document](docs/screenshots/02-dashboard.png), [chat answer with citations](docs/screenshots/03-chat-answer.png). No stock or fake screenshots are included.
 
 ---
 

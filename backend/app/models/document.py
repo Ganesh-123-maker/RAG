@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -42,7 +46,7 @@ class Document(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    owner: Mapped[User] = relationship("User", back_populates="documents")  # noqa: F821
+    owner: Mapped[User] = relationship("User", back_populates="documents")
 
     def __repr__(self) -> str:
         return f"<Document id={self.id} name={self.original_name} status={self.status}>"

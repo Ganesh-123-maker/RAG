@@ -203,4 +203,6 @@ def configure_logging(level: str = "INFO") -> None:
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # BaseSettings populates required fields (e.g. OPENAI_API_KEY)
+    # from the environment at construction; mypy cannot see that.
+    return Settings()  # type: ignore[call-arg]

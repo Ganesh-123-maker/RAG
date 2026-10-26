@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.conversation import Conversation
+    from app.models.document import Document
 
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -32,10 +37,10 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    documents: Mapped[list[Document]] = relationship(  # noqa: F821
+    documents: Mapped[list[Document]] = relationship(
         "Document", back_populates="owner", cascade="all, delete-orphan"
     )
-    conversations: Mapped[list[Conversation]] = relationship(  # noqa: F821
+    conversations: Mapped[list[Conversation]] = relationship(
         "Conversation", back_populates="owner", cascade="all, delete-orphan"
     )
 

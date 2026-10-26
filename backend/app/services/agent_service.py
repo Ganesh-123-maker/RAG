@@ -39,10 +39,11 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncGenerator, Callable
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict, cast
 
 from langgraph.graph import END, StateGraph
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AsyncStream
+from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel
 
 from app.core.config import get_settings
@@ -609,12 +610,18 @@ async def reasoning_node(state: AgentState) -> dict:
     sink = state.get("stream_sink")
     try:
         if sink is not None:
-            stream = await llm.chat.completions.create(
-                model=settings.OPENAI_CHAT_MODEL,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=settings.CHAT_MAX_TOKENS,
-                stream=True,
+            # The SDK's create() overloads return a union; with
+            # stream=True the result is an async stream, cast so mypy
+            # (and readers) do not have to re-derive that.
+            stream = cast(
+                AsyncStream[ChatCompletionChunk],
+                await llm.chat.completions.create(
+                    model=settings.OPENAI_CHAT_MODEL,
+                    messages=cast(Any, messages),
+                    temperature=0.1,
+                    max_tokens=settings.CHAT_MAX_TOKENS,
+                    stream=True,
+                ),
             )
             full = ""
             async for chunk in stream:
@@ -629,7 +636,7 @@ async def reasoning_node(state: AgentState) -> dict:
             return {**state, "answer": full}
         response = await llm.chat.completions.create(
             model=settings.OPENAI_CHAT_MODEL,
-            messages=messages,
+            messages=cast(Any, messages),
             temperature=0.1,
             max_tokens=settings.CHAT_MAX_TOKENS,
         )
@@ -661,7 +668,7 @@ async def direct_answer_node(state: AgentState) -> dict:
     try:
         response = await llm.chat.completions.create(
             model=settings.OPENAI_CHAT_MODEL,
-            messages=messages,
+            messages=cast(Any, messages),
             temperature=0.1,
             max_tokens=settings.CHAT_MAX_TOKENS,
         )

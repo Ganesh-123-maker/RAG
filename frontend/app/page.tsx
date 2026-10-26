@@ -61,7 +61,7 @@ export default function LandingPage() {
           <div className="relative max-w-4xl mx-auto animate-fade-in">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-brand-600/10 border border-brand-500/20 text-brand-300 text-sm font-medium mb-8">
               <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse-slow" />
-              Powered by GPT-4o + Qdrant vector search
+              Powered by your documents + Qdrant vector search
             </div>
 
             <h1 className="text-5xl md:text-7xl font-bold text-slate-100 mb-6 leading-tight">
@@ -135,7 +135,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-surface-border py-8 text-center text-slate-500 text-sm">
-        RAG Knowledge Assistant · Built with Next.js, FastAPI, Qdrant & GPT-4o
+        RAG Knowledge Assistant · Built with Next.js, FastAPI and Qdrant
       </footer>
     </div>
   );

@@ -11,9 +11,25 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    HasIdCondition,
+    IsEmptyCondition,
+    IsNullCondition,
     MatchValue,
+    NestedCondition,
     PointStruct,
     VectorParams,
+)
+
+# Filter.must is invariant over its element union, so a plain
+# list[FieldCondition] is not assignable to it; conditions are built
+# in exactly the parameter's element type.
+FilterCondition = (
+    FieldCondition
+    | IsEmptyCondition
+    | IsNullCondition
+    | HasIdCondition
+    | NestedCondition
+    | Filter
 )
 
 from app.core.circuit_breaker import CircuitBreaker
@@ -303,7 +319,7 @@ class VectorStoreService:
         pool = max(
             top_k, fetch_k if fetch_k is not None else settings.RETRIEVAL_FETCH_K
         )
-        must_conditions = [
+        must_conditions: list[FilterCondition] = [
             FieldCondition(key="owner_id", match=MatchValue(value=str(owner_id)))
         ]
         if document_id is not None:
