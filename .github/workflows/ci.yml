@@ -89,9 +89,8 @@ jobs:
         run: ruff format --check app tests eval
 
   backend-mypy:
-    name: Backend mypy (NON-BLOCKING, see phase-g report)
+    name: Backend mypy
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -109,7 +108,7 @@ jobs:
           pip install -r requirements.txt
           pip install mypy==2.4.0
 
-      - name: mypy (14 pre-existing errors on phase-g branch; NOT clean)
+      - name: mypy (clean since 2026-10-26; blocking)
         working-directory: ./backend
         run: mypy app --ignore-missing-imports
 

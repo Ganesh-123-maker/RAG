@@ -198,7 +198,7 @@ that matters here):
 | Frontend `next build` | succeeds (7 pages) |
 | Playwright E2E (mock-API mode) | **1 passed** (signup → upload → ask → cited answer) |
 | Ruff `check` + `format --check` | clean |
-| mypy | **NOT clean: 14 pre-existing errors** (non-blocking CI job, documented in `docs/phase-g-report.md`) |
+| mypy | **clean** (blocking CI job since 2026-10-26) |
 | Bandit | 11 Low, 0 Medium, 0 High |
 | pip-audit | 71 records (documented accepted risk, see `docs/SECURITY.md`) |
 | npm audit | CI first run: 15 vulnerabilities (3 moderate, 11 high, 1 critical), incl. Next.js 14.2.5 update; non-blocking CI job, see docs/SECURITY.md |
@@ -329,8 +329,7 @@ Qdrant Cloud free tier.
 - **Dark-only theme;** secondary text in slate-500 is 4.0:1, below WCAG AA for normal text.
 - **Docker smoke not run in the sandbox** (no Docker here); CI's `docker-build` and `compose-smoke` jobs are the verification path, and the compose smoke uses a placeholder key so it proves boot/readiness, not chat.
 - **Live deployment pending credentials** (see Deployment status above).
-- **mypy not clean** (14 pre-existing errors) and **dependency scans not clean** (see Testing / Security).
-- **Screenshots/GIF pending** (see Documentation above).
+- **Dependency scans not clean** (see Testing / Security) — upgrades are the next remaining item.
 
 ---
 
