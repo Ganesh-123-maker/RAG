@@ -252,6 +252,13 @@ GPT-4o result. Full discussion, run outputs, and the tuning decision:
   planner's direct branch in the previous run all refuse now; the
   one genuine miss (un-16) is a reasoning judgement on an
   in-corpus-vocabulary probe, not a routing bypass.
+- **Latest live run, specific-number grade bar**
+  (`docs/eval/gemini-live-full-numeric-grade/`, 55 golden,
+  2026-10-27): hit@1/3/5 = 1.0, citation precision 1.0,
+  faithfulness 0.9955, refusal 0.9375 (15/16, all exact refusal
+  text), injection 1.0 (6/6), judge 55/55, latency p50 2.3s.
+  un-16 now refuses exactly; the one remaining miss is un-15's
+  hedged answer (no refusal marker), not a routing bypass.
 - **Honest limits:** the corpus is small and the golden questions
   were written against it, so perfect retrieval proves the pipeline
   end to end, not general quality on a large corpus. Refusal was
