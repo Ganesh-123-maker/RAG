@@ -153,11 +153,42 @@ What these runs teach, and what they do not:
   Pinned by `tests/test_grade_refusal.py` (helper, grade branches,
   graph-level refuse-without-reasoning and good-grade-still-reasons)
   and a rewritten `test_phase_c` still-poor case.
-- **NOT yet claimed:** no new live refusal rate. The measurement
-  above predicts 16/16 on this corpus, but a live eval re-run with
-  the new graph is still pending (Gemini free-tier quota + ~100 min
-  runtime); until it runs, the shipped refusal figure stays the
-  measured 11/16 from the pre-change full run.
+- **Live re-run with the new graph, 2026-10-27**
+  (`docs/eval/gemini-live-full-post-refusal/`, Gemini free tier,
+  same 55+16+6 set, ~44 min): **refusal 10/16 (0.625), NOT 16/16**.
+  Hit@1/3/5 still 1.0, citation 0.9423 (was 0.9623), faithfulness
+  0.9348 (was 0.9636), judge 53/55 (was 52/54 evaluated),
+  injection 5/6 (unchanged). The prediction failed for a specific,
+  diagnosed reason, not a grade malfunction:
+  - The 5 still-answered probes never reach the grade at all: the
+    planner routes them to the **direct branch**
+    (`needs_retrieval=False`), so they are answered from
+    pretraining with zero citations. The coverage measurement
+    assumed the retrieval path; the live leak is upstream, in the
+    planner. Verified by replaying planner -> retriever -> grade
+    for all 5 with real Gemini: all 5 direct, grade never runs.
+  - The one flip, un-15 (refused in baseline, answered now),
+    passes the grade by design (coverage 0.80, top 0.696) and was
+    answered by reasoning with 1 citation -- LLM variation in
+    reasoning/verify, not a grade regression (the old score-only
+    grade would also have passed it).
+  - The 2 golden refusals (vec-06, doc-05) are likewise NOT grade
+    refusals: replayed grade is good for both (coverage 1.00 /
+    0.86, tops 0.723 / 0.691, matching the run's retrieved scores),
+    so they were refused downstream by reasoning/verify -- LLM
+    variation, same class as the baseline's own run-to-run wobble
+    (9/16 -> 11/16 across runs). 10/16 sits inside that noise band;
+    the honest conclusion is **no measured refusal improvement
+    from the grade change on this corpus**, because the remaining
+    failures bypass it.
+  - Consequence: the next refusal fix must narrow the planner's
+    direct branch (direct only for greetings/small talk, never for
+    factual questions, even general-knowledge ones), so factual
+    probes flow through retrieval -> grade -> refusal. That change
+    is NOT in this run; it needs its own implementation, tests,
+    and another live re-run before any new refusal figure is
+    claimed. Until then the shipped refusal figure is 10/16 from
+    this run, with the mechanism above explaining it.
 - Injection: inj-04 failed in both 0.30 runs and passed in the 0.50
   variant; with n=6 that single flip is not evidence the threshold
   caused it.
