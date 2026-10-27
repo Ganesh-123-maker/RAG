@@ -244,15 +244,24 @@ GPT-4o result. Full discussion, run outputs, and the tuning decision:
 - **Capped live run** (`docs/eval/gemini-live-limit20/`, 20 golden):
   hit@1/3/5 = 1.0, citation precision 1.0, faithfulness 0.9833,
   refusal 0.5625 (9/16), injection 0.8333 (5/6), judge 20/20.
+- **Latest live run, planner guard** (`docs/eval/gemini-live-full-planner-fix/`,
+  55 golden, 2026-10-27): hit@1/3/5 = 1.0, citation precision 1.0,
+  faithfulness 0.9955, refusal 0.9375 (15/16 by the runner's fixed
+  rule; 14/16 exact refusal text), injection 1.0 (6/6), judge
+  53/55, latency p50 2.5s. The 5 probes that leaked through the
+  planner's direct branch in the previous run all refuse now; the
+  one genuine miss (un-16) is a reasoning judgement on an
+  in-corpus-vocabulary probe, not a routing bypass.
 - **Honest limits:** the corpus is small and the golden questions
   were written against it, so perfect retrieval proves the pipeline
-  end to end, not general quality on a large corpus. **Refusal is
-  the weak metric** (0.50–0.6875 across runs) and it wobbles run to
-  run on identical probes. Raising the similarity threshold 0.30 →
-  0.50 was tested (`docs/eval/gemini-live-limit20-threshold050/`) and
-  did **not** improve refusal (8/16 vs 9/16), so the production
-  default stays at 0.30; a grade-based refusal is the identified
-  future fix, not a shipped change.
+  end to end, not general quality on a large corpus. Refusal was
+  the weak metric (0.50–0.6875 across early runs) and still wobbles
+  run to run on identical probes. Raising the similarity threshold
+  0.30 → 0.50 was tested (`docs/eval/gemini-live-limit20-threshold050/`)
+  and did **not** improve refusal (8/16 vs 9/16), so the production
+  default stays at 0.30. Grade-based refusal (2026-10-26) and the
+  deterministic planner direct-branch guard (2026-10-27) are now
+  shipped and measured at 15/16, not future fixes.
 - **Offline smoke results (labelled as such):** `docs/eval/offline-smoke-1/`
   (current config, threshold 0.30) and
   `docs/eval/offline-smoke-threshold-off/` (threshold 0.0). The

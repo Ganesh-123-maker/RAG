@@ -103,6 +103,7 @@ and a Gemini daily quota exhaustion, via per-question checkpointing
 | `gemini-live-limit20` (20 golden, threshold 0.30) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9833 | 0.5625 (9/16) | 0.8333 (5/6) | 20/20 | 8.41s / 14.33s |
 | `gemini-live-full` (55 golden, threshold 0.30) | 1.0 | 1.0 | 1.0 | 1.0 | 0.9623 | 0.9636 | 0.6875 (11/16) | 0.8333 (5/6) | 52/54 (mmr-02 judge 503'd; wrong: vec-05, sse-02) | 9.98s / 78.46s |
 | `gemini-live-limit20-threshold050` (20 golden, threshold 0.50) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.50 (8/16) | 1.0 (6/6) | 16/16 evaluated (4 judge calls 503'd: qdr-01/02/05/06) | 13.08s / 181.86s |
+| `gemini-live-full-planner-fix` (55 golden, grade + planner guard) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9955 | 0.9375 (15/16; 14/16 exact refusal text) | 1.0 (6/6) | 53/55 (wrong: doc-04, doc-05, both golden refusals) | 2.47s / 6.93s |
 
 Raw outputs: `docs/eval/gemini-live-limit20/`,
 `docs/eval/gemini-live-full/`,
@@ -189,6 +190,38 @@ What these runs teach, and what they do not:
     and another live re-run before any new refusal figure is
     claimed. Until then the shipped refusal figure is 10/16 from
     this run, with the mechanism above explaining it.
+- **Planner direct-branch guard + live re-run, 2026-10-27**
+  (`docs/eval/gemini-live-full-planner-fix/`, Gemini free tier,
+  same 55+16+6 set, ~44 min, exit 0): **refusal 15/16 (0.9375)**
+  by the runner's fixed rule (`eval/metrics.py::is_refusal`:
+  exact refusal text or a refusal marker). Hit@1/3/5 still 1.0,
+  citation 1.0, faithfulness 0.9955, judge 53/55, injection 6/6,
+  latency p50 2.47s / p95 6.93s (no 503 storm this run). The guard
+  is the fix from the previous section: a deterministic
+  conversational check in `planner_node` (`is_conversational` in
+  `agent_service.py`) that forces factual questions to retrieval
+  even when the planner says direct, plus a strengthened planner
+  prompt; pinned by `tests/test_planner_direct_guard.py`.
+  - All 5 probes that leaked through the direct branch in the
+    previous run now refuse with the exact refusal text. The
+    guard fixed exactly the diagnosed leak; the bypass class is
+    closed.
+  - Strict count: 14/16 exact refusal text. un-15 counts under
+    the marker rule only: reasoning answered but said the
+    documents do not contain the information (1 citation) -- a
+    soft refusal, not the exact text. un-16 is the one genuine
+    answer: it extrapolates the guide's 12M-vector worked example
+    to the asked 100M figure. Both are the in-corpus-vocabulary
+    probes the previous analysis predicted would stay
+    reasoning-dependent; the remaining leak is a reasoning/verify
+    judgement call, not a routing bypass.
+  - Golden refusals are 2 again, but their identity shifted
+    (doc-04 new, vec-06 fixed; doc-05 repeats) and both are
+    judge-False, i.e. reasoning/verify refusals on answerable
+    questions -- LLM variation, same class as before, not grade
+    refusals. Judge 53/55 matches the previous run's count.
+  - Shipped refusal figure is now 15/16 (runner rule) / 14/16
+    exact text. Do not quote 16/16: un-16 is a measured miss.
 - Injection: inj-04 failed in both 0.30 runs and passed in the 0.50
   variant; with n=6 that single flip is not evidence the threshold
   caused it.
