@@ -151,7 +151,7 @@ async def run_evaluation(cfg: dict) -> dict:
     # Import every model module so relationships resolve and all
     # tables are created (importing only User fails on 'Conversation').
     import app.models.conversation
-    import app.models.document  # noqa: F401
+    import app.models.document
     import app.models.refresh_token  # noqa: F401 -- added in PR #26; without it User.refresh_tokens fails to resolve
     from app.core.database import Base
     from app.models.user import User

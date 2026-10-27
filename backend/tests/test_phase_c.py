@@ -171,8 +171,12 @@ async def test_grade_node_branches() -> None:
 
 @pytest.mark.asyncio
 async def test_planner_skip_direct_answer() -> None:
+    # The fixture question must be conversational: the 2026-10-27
+    # direct-branch guard forces factual questions to retrieval even
+    # when the planner says direct, so the old "What is the capital?"
+    # fixture would no longer take the direct branch.
     fake = _FakeLLM(_PLAN_DIRECT, _REWRITE, ["Hello! How can I help?"])
-    final = await _run_graph(fake, [])
+    final = await _run_graph(fake, [], question="Hello!")
     assert final["answer"] == "Hello! How can I help?"
     assert final["citations"] == []
     assert final["verify_result"] == "skipped"
