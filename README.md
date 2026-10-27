@@ -55,7 +55,7 @@
 - **Grounded prompting and chunk-id citations** — Context blocks are delimited and marked as data, not instructions. Citations reference chunk ids (not positions) and are validated: only chunks actually retrieved and cited by the model are shown, with page/section and snippet, in a clickable source panel in the UI.
 - **Conversation memory** — PostgreSQL message history, bounded by a token budget (context 6000 tokens, history 2000 tokens, chat output capped at 1000 tokens). This is history, not semantic long-term memory.
 - **Background ingestion** — Uploads queue (queued → processing → ready/error) with progress, retry on embedding failure (max 2 attempts), and a worker (`backend/scripts/run_ingestion_worker.py`) plus an orphan-reconciliation script.
-- **Auth and isolation** — JWT with bcrypt, httpOnly cookies (JavaScript never sees the token), logout revocation via a token denylist, owner-scoped repositories, and an `owner_id` Qdrant filter on every search. Refresh tokens are deferred (see Limitations).
+- **Auth and isolation** — JWT with bcrypt, httpOnly cookies (JavaScript never sees the token), logout revocation via a token denylist plus DB refresh-token revocation, rotating refresh tokens with reuse detection, owner-scoped repositories, and an `owner_id` Qdrant filter on every search (see Limitations).
 - **Rate limits and quotas** — Per-minute limits (auth 10, upload 10, chat 30), login lockout after 5 failures (15 minutes), and a per-user daily quota (200 chats, 200k estimated tokens -- an estimate, not metered usage). All single-instance/in-memory unless noted.
 - **Observability** — Structured JSON logs with request IDs, a Prometheus-text `/metrics` endpoint, per-node tracing logs, and an optional Sentry hook (no DSN = no-op). Circuit breaker around Qdrant search (3 failures, 60s cooldown).
 - **Frontend** — Next.js 14 App Router, Tailwind, dark theme, responsive/mobile sidebar, streaming controls (stop, retry, regenerate, copy), citation chips opening a source panel, conversation rename/delete, document status/progress, drag-and-drop upload with validation. Markdown answers render sanitised (no raw HTML execution).
@@ -198,10 +198,10 @@ that matters here):
 | Frontend `next build` | succeeds (7 pages) |
 | Playwright E2E (mock-API mode) | **1 passed** (signup → upload → ask → cited answer) |
 | Ruff `check` + `format --check` | clean |
-| mypy | **NOT clean: 14 pre-existing errors** (non-blocking CI job, documented in `docs/phase-g-report.md`) |
-| Bandit | 11 Low, 0 Medium, 0 High |
-| pip-audit | 71 records (documented accepted risk, see `docs/SECURITY.md`) |
-| npm audit | CI first run: 15 vulnerabilities (3 moderate, 11 high, 1 critical), incl. Next.js 14.2.5 update; non-blocking CI job, see docs/SECURITY.md |
+| mypy | **clean** (blocking CI job since 2026-10-26) |
+| Bandit | 12 Low, 0 Medium, 0 High |
+| pip-audit | **3 records in 2 packages** after the 2026-10-26 upgrade (was 57 re-measured, 71 in Phase G); all 3 have no fixed release and are documented accepted risks, see `docs/SECURITY.md` |
+| npm audit | **2 vulnerabilities (1 moderate, 1 high)** measured in CI 2026-10-27, both PostCSS via Next's bundled copy; fix requires breaking Next 16 upgrade, so documented, not applied — see docs/SECURITY.md |
 | Docker builds / compose smoke | **not run in this sandbox (no Docker)**; covered by CI jobs (`docker-build`, `compose-smoke`) |
 
 Run the backend suite:
@@ -277,14 +277,12 @@ Summary only; the full review, scan results, and accepted risks are in
   `owner_id` Qdrant filter, login lockout, rate limits, tightened CORS
   (production rejects `*`), security headers, sanitised Markdown
   rendering (no raw HTML execution, no `dangerouslySetInnerHTML`).
-- Scans are **not claimed clean**: bandit 11 Low / 0 Medium / 0 High;
-  pip-audit 71 records across pinned/transitive dependencies
-  (notably `python-jose`, `python-multipart`, `starlette` via FastAPI
-  0.111, and LangGraph transitive deps). They are a documented
-  accepted risk **only while the app has no public deployment**,
-  with a review note in `docs/SECURITY.md`; upgrading FastAPI /
-  LangGraph pins is a separate, fully-retested task and must happen
-  before any public deploy.
+- Scans are **not claimed clean**: bandit 12 Low / 0 Medium / 0 High;
+  pip-audit 3 records in 2 packages after the 2026-10-26 upgrade
+  (`python-jose`, `ecdsa` — no fixed release exists for either;
+  documented accepted risk **only while the app has no public
+  deployment**, with the unreachability reasoning in
+  `docs/SECURITY.md`). Re-check both before any public deploy.
 - Secrets come only from the environment. The dev-only JWT secret in
   code is refused in production; it is flagged by bandit as Low and
   documented there.
@@ -315,7 +313,7 @@ Qdrant Cloud free tier.
 - [`docs/phase-a-report.md`](docs/phase-a-report.md) … [`docs/phase-g-report.md`](docs/phase-g-report.md) -- per-phase reports
 - [`CHANGELOG.md`](CHANGELOG.md), [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Demo seed: `backend/scripts/seed_demo.py` (needs a running stack; see its help text)
-- Demo screenshots/GIF: **TODO** -- not produced in the sandbox (no running stack to screenshot); exact steps are in `docs/phase-g-report.md`. No stock or fake screenshots are included.
+- Demo screenshots (real UI against a local stack, 2026-10-26; see `docs/manual-api-exercise.md` for the run): [login](docs/screenshots/01-login.png), [dashboard with a Ready document](docs/screenshots/02-dashboard.png), [chat answer with citations](docs/screenshots/03-chat-answer.png). No stock or fake screenshots are included.
 
 ---
 
@@ -325,12 +323,11 @@ Qdrant Cloud free tier.
 - **Thresholds are measured, not tuned optima:** similarity 0.30 was tested against 0.50 on live data and kept (0.50 did not improve refusal); grade 0.50, MMR λ 0.7, and fetch-k 20 remain untested defaults. Do not claim they are tuned.
 - **Verify is overlap-based, not LLM faithfulness:** `verify_node` checks cited chunk ids were retrieved and share substantive tokens with the answer. It catches unsupported citations, not subtle hallucinations.
 - **Single-instance limits:** rate limits, quotas, token denylist, metrics, and the ingestion worker are in-memory/single-instance and do not survive restart (except the DB queue) or span replicas.
-- **Refresh tokens deferred:** logout revokes only the current token, in this process. Daily token budget is an estimate (chars/4), not metered usage.
+- **Refresh tokens implemented:** opaque, hash-stored, rotating tokens with reuse detection (whole-family revocation); logout revokes the refresh token in the DB. Access-token denylist revocation is still in-memory only. Daily token budget is an estimate (chars/4), not metered usage.
 - **Dark-only theme;** secondary text in slate-500 is 4.0:1, below WCAG AA for normal text.
 - **Docker smoke not run in the sandbox** (no Docker here); CI's `docker-build` and `compose-smoke` jobs are the verification path, and the compose smoke uses a placeholder key so it proves boot/readiness, not chat.
 - **Live deployment pending credentials** (see Deployment status above).
-- **mypy not clean** (14 pre-existing errors) and **dependency scans not clean** (see Testing / Security).
-- **Screenshots/GIF pending** (see Documentation above).
+- **Dependency scans not clean** (see Testing / Security) — upgrades are the next remaining item.
 
 ---
 

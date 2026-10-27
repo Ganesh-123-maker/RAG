@@ -89,9 +89,8 @@ jobs:
         run: ruff format --check app tests eval
 
   backend-mypy:
-    name: Backend mypy (NON-BLOCKING, see phase-g report)
+    name: Backend mypy
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -109,7 +108,7 @@ jobs:
           pip install -r requirements.txt
           pip install mypy==2.4.0
 
-      - name: mypy (14 pre-existing errors on phase-g branch; NOT clean)
+      - name: mypy (clean since 2026-10-26; blocking)
         working-directory: ./backend
         run: mypy app --ignore-missing-imports
 
@@ -134,11 +133,11 @@ jobs:
           pip install -r requirements.txt
           pip install bandit==1.9.4 pip-audit==2.10.1
 
-      - name: Bandit (11 Low, 0 Medium/High on phase-g branch)
+      - name: Bandit (12 Low, 0 Medium/High after 2026-10-26 re-measure)
         working-directory: ./backend
         run: bandit -r app
 
-      - name: pip-audit (71 records on phase-g branch, documented risk)
+      - name: pip-audit (3 no-fix records after 2026-10-26 upgrade, documented risk)
         working-directory: ./backend
         run: pip-audit -r requirements.txt
 

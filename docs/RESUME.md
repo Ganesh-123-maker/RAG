@@ -95,9 +95,10 @@ numbers, never OpenAI/GPT-4o numbers. Full runs:
   metric (0.6875) and similarity 0.30 was kept after a 0.50 variant
   failed to improve it; other thresholds untuned; verify is
   overlap, not faithfulness; rate limits and
-  quotas are single-instance/in-memory; refresh tokens deferred;
-  daily token budget is an estimate; mypy has 14 pre-existing
-  errors; pip-audit has 71 records (documented accepted risk,
+  quotas are single-instance/in-memory; refresh tokens implemented
+  2026-10-26 (rotating, reuse detection); mypy clean since
+  2026-10-26 (blocking CI); daily token budget is an estimate;
+  pip-audit has 71 records (documented accepted risk,
   must be upgraded before any public deploy); live deployment
   pending credentials; Docker smoke not run in the sandbox
   (CI covers it). Naming these unprompted is the strongest

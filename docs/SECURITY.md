@@ -9,10 +9,23 @@
   JavaScript never sees the token (Phase E removed all `js-cookie`
   token handling from app code; the `js-cookie` package itself was
   already gone from `package.json` by Phase F).
-- Logout revokes only the current token, via an in-memory denylist
-  (`core/token_denylist.py`). **Refresh tokens are deferred** (Phase
-  E decision): there is no refresh flow, and logout revocation does
-  not survive a process restart or span replicas.
+- Logout revokes the current access token, via an in-memory denylist
+  (`core/token_denylist.py`), and revokes the presented refresh
+  token in the database. Access-token denylist revocation does not
+  survive a process restart or span replicas; refresh-token
+  revocation does (it is a DB row, not process memory).
+- Refresh tokens: opaque tokens (`secrets.token_urlsafe(32)`)
+  stored only as SHA-256 hashes (`models/refresh_token.py`,
+  migration `004_refresh_tokens`), 7-day expiry
+  (`REFRESH_TOKEN_EXPIRE_DAYS`), httpOnly cookie scoped to
+  `/api/v1/auth`, rotated on every use in the same family
+  (`services/refresh_token_service.py`). Presenting an
+  already-replaced token is reuse (stolen-token replay): the whole
+  family is revoked. Expired, revoked, and unknown tokens all
+  return the same generic 401, so failures do not leak which reason
+  applied. The frontend retries once after a successful refresh
+  (`lib/api.ts`, one shared in-flight refresh for concurrent
+  401s); if refresh fails it falls back to the login redirect.
 - Login lockout: 5 failed attempts per account, then 15 minutes
   locked (429 + `Retry-After`). Register/login are rate-limited per
   email/IP (see below).
@@ -75,11 +88,16 @@
   HTML in an answer is not executed.
 - Security headers (`next.config.js`): `X-Content-Type-Options:
   nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy:
-  strict-origin-when-cross-origin`, and a CSP (`default-src 'self'`,
-  style `unsafe-inline` only -- required by Tailwind-injected
-  styles; no script `unsafe-inline`/`unsafe-eval` for app code, but
-  see the Phase F note: CSP allows `'unsafe-inline'` scripts for
-  Next.js hydration; a nonce-based CSP is a follow-up, not done).
+  strict-origin-when-cross-origin`, and a nonce CSP
+  (`frontend/middleware.ts`): each request gets a fresh random nonce,
+  Next.js stamps its inline scripts with it via the `x-nonce`
+  request header, and `script-src` allows only `'self'` plus that
+  nonce -- no script `unsafe-inline`/`unsafe-eval` anywhere. Pages
+  are `force-dynamic` because statically prerendered pages are baked
+  before any request nonce exists, so their inline scripts would
+  ship nonce-less and be blocked (verified by header inspection and
+  the Playwright journey). Style `unsafe-inline` remains, required
+  by Tailwind-injected styles.
 - Errors to clients are typed and safe: ingestion failures return
   422/502/500 with a safe message, never raw exception text (a
   sentinel-string test proves this); full errors are logged
@@ -87,56 +105,90 @@
 
 ## Scan results -- NOT clean, read this before deploying
 
-### Bandit (Phase G run, same result as Phase E)
+### Bandit (re-measured 2026-10-26)
 
-`bandit -r app`: **11 Low, 0 Medium, 0 High.** All Low findings are
-documented false positives / intentional: the dev-only secret string
-(production refuses it), best-effort `try/except/pass` shutdown and
-cleanup blocks (now annotated with `# noqa` reasons where they are
-intentional), the literal `token_type="bearer"`, and pre-existing
-`assert` uses in MMR code. No bandit finding was hidden with a
-blanket ignore.
+`bandit -r app`: **12 Low, 0 Medium, 0 High** (was 11 in Phase G;
+the one new Low is a best-effort `try/except/pass` in the
+refresh-token auth path, same intentional pattern as the others).
+All Low findings are documented false positives / intentional: the
+dev-only secret string (production refuses it), best-effort
+`try/except/pass` shutdown and cleanup blocks (annotated with
+`# noqa` reasons where they are intentional), the literal
+`token_type="bearer"`, and pre-existing `assert` uses in MMR code.
+No bandit finding was hidden with a blanket ignore.
 
-### pip-audit (Phase G run)
+### pip-audit (2026-10-26 upgrade, re-measured — not the Phase G count)
 
-`pip-audit -r requirements.txt`: **71 vulnerability records across
-12 dependencies** -- the same count Phase E recorded. Affected
-packages include `python-jose`, `python-multipart`, `starlette`
-(via FastAPI 0.111), `markdown`, `pdfminer-six`, `python-dotenv`,
-and LangGraph transitive deps (`langchain-core`, `langgraph`,
-`langgraph-checkpoint`, `langsmith`, `ecdsa`); `pytest` records are
-dev-only.
+Before (re-measured 2026-10-26 on the old pins): **57 records in
+11 packages**. After upgrading (see below): **3 records in 2
+packages**, both with **no fixed release available** — they are
+documented here, not hidden.
 
-**Accepted risk, with conditions (review note):** these are NOT
-upgraded in Phase G, because changing FastAPI/starlette/LangGraph
-pins is a dependency-upgrade task that needs its own full retest
-(pytest + compose smoke + a manual chat pass), and the app has no
-public deployment yet. This acceptance is valid **only while the app
-is not publicly deployed**. Before any public deploy, the upgrade
-must happen and this section must be rewritten with the new counts.
-Review/expiry: revisit at the next Dependabot cycle and in any case
-before v1.1.0 or before a public URL is announced, whichever comes
-first. Dependabot is configured (`.github/dependabot.yml`, weekly)
-and its PRs must be reviewed, never auto-merged, for exactly this
-reason.
+Upgrades applied 2026-10-26 (all in `backend/requirements.txt`,
+verified by the full suite — 130 pytest passed, Ruff clean, mypy
+clean, no application code changes needed):
+`fastapi` 0.111.0 → 0.162.0 (pulls `starlette` 0.37.2 → 1.10.0,
+clearing every starlette record), `pydantic` 2.7.4 → 2.14.1 and
+`pydantic-settings` 2.3.1 → 2.16.1 (required by the FastAPI bump),
+`langgraph` 0.2.16 → 1.2.17 (pulls `langchain-core` 1.7.0,
+`langgraph-checkpoint` 4.3.0, `langsmith` 0.14.12),
+`python-jose` 3.3.0 → 3.5.0, `markdown` 3.6 → 3.11.2,
+`pdfplumber` 0.11.0 → 0.11.10 (pulls `pdfminer.six` 20260107),
+`python-dotenv` 1.0.1 → 1.2.4, `pytest` 8.2.2 → 9.1.1 and
+`pytest-asyncio` 0.23.7 → 1.4.1 (dev-only). Everything else in
+requirements.txt is unchanged.
+
+**Remaining 3 records — accepted risk, with conditions:** no fixed
+version exists for any of them, so they cannot be upgraded away,
+and each is unreachable from this app's code paths:
+- `python-jose` 3.5.0, PYSEC-2026-4298 (algorithm-confusion guard
+  bypass via DER-encoded public keys): the advisory's precondition
+  is "when algorithms are not explicitly restricted". This app
+  restricts them: `decode_access_token` passes
+  `algorithms=[settings.JWT_ALGORITHM]` with default `HS256`
+  (`app/core/security.py`, `app/core/config.py`), and it never
+  accepts caller-chosen algorithms.
+- `ecdsa` 0.19.2, PYSEC-2026-1325 ×2 (Minerva timing attack on
+  P-256 signing): `ecdsa` is only a transitive dependency of
+  `python-jose`; the app never imports it and never performs ECDSA
+  signing — all tokens are HS256. (The earlier JWE-compression DoS
+  record against `python-jose`, PYSEC-2025-185, no longer appears
+  in the post-upgrade audit.)
+This acceptance is valid **only while the app is not publicly
+deployed**. Before any public deploy, re-run pip-audit: if a fixed
+release exists for either package by then, upgrade to it and
+rewrite this section. Dependabot is configured
+(`.github/dependabot.yml`, weekly) and its PRs must be reviewed,
+never auto-merged, for exactly this reason.
 
 ### npm audit
 
-Not run cleanly in the Phase G sandbox (registry audit endpoint
-returned 403 -- a sandbox policy, not a clean result). It runs in CI
-as a non-blocking job (`frontend-security`, `--audit-level=moderate`).
-The first CI run reported **15 vulnerabilities (3 moderate, 11
-high, 1 critical)**, including the known `next@14.2.5` security
-update (upstream patch available, noted since Phase E). The job is
-non-blocking by design, so this result is visible on every PR, not
-hidden -- and the Next.js upgrade belongs with the dependency pass
-above, before any public deploy.
+Not runnable in this sandbox: the registry audit endpoint returns
+403 (`policy_denied`) -- a sandbox egress policy, not a clean
+result. **Measured in CI instead** (PR #26, run 2026-10-27):
+**2 vulnerabilities (1 moderate, 1 high)**, both PostCSS
+advisories (GHSA-qx2v-qp2m-jg93, GHSA-6g55-p6wh-862q,
+GHSA-fxqj-rqcc-2cmp, GHSA-r28c-9q8g-f849) via the PostCSS copy
+bundled inside Next.js itself. The audit-suggested fix is
+`next@16.4.3`, a breaking major upgrade, so it is NOT applied
+here: the findings stay as a documented, non-blocking CI failure
+until a deliberate Next 16 upgrade, which needs its own testing.
+It runs in CI as a non-blocking job (`frontend-security`,
+`--audit-level=moderate`). What was done locally 2026-10-26:
+`npm update` within the existing `^` ranges (no `package.json`
+range changes, no major upgrades — Next.js stays on 15.x, React
+on 19.x as instructed). Almost nothing moved: Next.js was already
+at the latest 15.x (15.5.28), React at 19.3.1; only `axios`
+1.19.0 → 1.20.0 and `remark-gfm` 4.0.0 → 4.0.1 plus transitive
+re-resolves changed in `package-lock.json`. The old "15
+vulnerabilities" figure predates the Next.js 15 upgrade and must
+not be quoted as current. Frontend vitest (21 passed), `tsc`, and
+`next build` all pass after the update.
 
 ## What is still open (security follow-ups)
 
-- Nonce-based CSP (replacing the hydration `'unsafe-inline'`).
-- Refresh-token flow (replacing single-token logout revocation).
 - Redis-backed rate limits / denylist / quotas for multi-instance
   deployments (current ones are single-instance).
-- Dependency upgrade + retest (see pip-audit accepted risk above).
+- Re-check the 3 remaining pip-audit records (python-jose, ecdsa)
+  before any public deploy — see the pip-audit section above.
 - A public-deploy security review pass after that upgrade.

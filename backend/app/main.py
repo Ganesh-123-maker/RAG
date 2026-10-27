@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
 
 from app.core.config import configure_logging, get_settings
@@ -116,15 +116,13 @@ async def _check_qdrant() -> None:
 
 
 @app.get("/metrics")
-async def metrics_endpoint() -> JSONResponse:
+async def metrics_endpoint() -> PlainTextResponse:
     """Minimal Prometheus-text metrics (Phase E).
 
     This is NOT a prometheus_client integration: counters and
     latency histograms are kept in-process and rendered as
     Prometheus text format. Per-process, lost on restart.
     """
-    from fastapi.responses import PlainTextResponse
-
     return PlainTextResponse(content=metrics.render(), media_type="text/plain")
 
 

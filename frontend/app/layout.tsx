@@ -5,11 +5,19 @@ import { Toaster } from "react-hot-toast";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
+// force-dynamic is required by the nonce CSP (see middleware.ts):
+// statically prerendered pages are baked at build time, before any
+// request nonce exists, so their inline RSC scripts would ship
+// without a nonce and the browser would block them. This app is an
+// authenticated client-side app, so giving up static prerendering
+// costs nothing measurable.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "RAG Knowledge Assistant — Ask Your Documents",
   description:
-    "Upload PDFs, DOCX, and text files. Ask questions and get precise, cited answers powered by GPT-4 and vector search.",
-  keywords: ["RAG", "AI", "document search", "knowledge assistant", "GPT-4"],
+    "Upload PDFs, DOCX, and text files. Ask questions and get precise, cited answers grounded in your documents.",
+  keywords: ["RAG", "AI", "document search", "knowledge assistant"],
 };
 
 export default function RootLayout({

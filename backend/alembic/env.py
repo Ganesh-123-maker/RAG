@@ -16,6 +16,7 @@ from app.core.database import Base          # noqa: E402
 from app.models.user import User            # noqa: E402,F401
 from app.models.document import Document    # noqa: E402,F401
 from app.models.conversation import Conversation, Message  # noqa: E402,F401
+from app.models.refresh_token import RefreshToken  # noqa: E402,F401
 from app.core.config import get_settings    # noqa: E402
 
 settings = get_settings()

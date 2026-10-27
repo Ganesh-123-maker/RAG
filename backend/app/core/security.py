@@ -62,6 +62,27 @@ def clear_auth_cookie(response: Response) -> None:
     response.delete_cookie(key="access_token", path="/")
 
 
+def set_refresh_cookie(response: Response, token: str) -> None:
+    """Set the refresh-token cookie: same protections as the access
+    cookie (httpOnly always, Secure only in production), but scoped
+    to the auth routes (path=/api/v1/auth) so it is only sent where
+    the refresh endpoint can use it, and with the refresh lifetime.
+    """
+    response.set_cookie(
+        key="refresh_token",
+        value=token,
+        httponly=True,
+        secure=(settings.ENVIRONMENT or "development").lower() == "production",
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api/v1/auth",
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth")
+
+
 def decode_access_token(token: str) -> dict[str, Any]:
     return jwt.decode(
         token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]

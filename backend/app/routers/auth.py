@@ -10,12 +10,17 @@ from app.core.dependencies import CurrentUser
 from app.core.rate_limit import check_rate_limit
 from app.core.security import (
     clear_auth_cookie,
+    clear_refresh_cookie,
+    create_access_token,
     decode_access_token,
     set_auth_cookie,
+    set_refresh_cookie,
 )
 from app.core.token_denylist import revoke
+from app.repositories.user_repository import UserRepository
 from app.schemas.auth import RegisterRequest, TokenResponse, UserResponse
 from app.services.auth_service import AuthService
+from app.services.refresh_token_service import RefreshTokenService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -84,15 +89,53 @@ async def login(
     # Browser path: httpOnly cookie (JS never sees the token). The
     # token is still returned in the body for API clients.
     set_auth_cookie(response, result.access_token)
+    # Refresh token: same browser-only handling, scoped cookie.
+    user = await UserRepository(db).get_by_email(str(email))
+    if user is not None:
+        refresh_svc = RefreshTokenService(db)
+        raw_refresh = await refresh_svc.issue(user)
+        await db.commit()
+        set_refresh_cookie(response, raw_refresh)
     return result
 
 
-@router.post("/logout")
-async def logout(request: Request, current_user: CurrentUser) -> JSONResponse:
-    """Revoke the current token (denylist) and clear the cookie.
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    """Rotate the refresh cookie into a fresh access token.
 
-    Refresh tokens are deliberately deferred (see phase-e report):
-    logout revocation here is the current token only.
+    Reads only the httpOnly `refresh_token` cookie (JS never holds
+    the token). Rotation revokes the presented token and issues a
+    new one in the same family; reuse of a rotated token revokes
+    the whole family (see RefreshTokenService). Every failure is
+    the same generic 401.
+    """
+    raw = request.cookies.get("refresh_token")
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+    refresh_svc = RefreshTokenService(db)
+    new_raw, user_id = await refresh_svc.rotate(raw)
+    access_token = create_access_token(subject=user_id)
+    set_auth_cookie(response, access_token)
+    set_refresh_cookie(response, new_raw)
+    return TokenResponse(access_token=access_token, token_type="bearer")
+
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Revoke the current token (denylist), revoke the presented
+    refresh token, and clear both cookies. Logout must succeed even
+    if either token is already invalid.
     """
     token: str | None = None
     auth = request.headers.get("authorization", "")
@@ -107,8 +150,12 @@ async def logout(request: Request, current_user: CurrentUser) -> JSONResponse:
                 revoke(payload["jti"])
         except Exception:  # noqa: BLE001, S110 -- logout must succeed even if the token is already invalid
             pass
+    raw_refresh = request.cookies.get("refresh_token")
+    if raw_refresh:
+        await RefreshTokenService(db).revoke_presented(raw_refresh)
     response = JSONResponse(content={"detail": "Logged out"})
     clear_auth_cookie(response)
+    clear_refresh_cookie(response)
     return response
 
 

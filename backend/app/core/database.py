@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -9,7 +10,7 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-engine_kwargs = {
+engine_kwargs: dict[str, Any] = {
     "echo": settings.ENVIRONMENT == "development",
 }
 if "sqlite" not in settings.DATABASE_URL:

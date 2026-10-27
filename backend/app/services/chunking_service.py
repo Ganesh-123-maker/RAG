@@ -274,14 +274,17 @@ def chunk_text(
             continue
         start = match.start()
         end = start + len(stripped)
-        seg = _segment_for_offset(spans, start)
+        # Renamed: the span loop above already binds `seg` as
+        # ExtractedSegment, so reusing it for a possibly-None lookup
+        # result is a type error.
+        seg_for_unit = _segment_for_offset(spans, start)
         units.append(
             _Unit(
                 start=start,
                 end=end,
                 tokens=len(tokenizer.encode(stripped)),
-                page=seg.page if seg else None,
-                section=seg.section if seg else None,
+                page=seg_for_unit.page if seg_for_unit else None,
+                section=seg_for_unit.section if seg_for_unit else None,
             )
         )
     if not units:

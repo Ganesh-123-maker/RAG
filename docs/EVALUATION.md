@@ -134,11 +134,30 @@ What these runs teach, and what they do not:
 - Why threshold tuning cannot fix refusal here: the graph refuses
   on empty chunks (see `agent_service.py`, reasoning node), and
   out-of-corpus probes still retrieve topically related chunks above
-  0.50, so the LLM answers from them instead of refusing. A real
-  refusal improvement needs a grade-based refusal (refuse when the
-  grade is poor even with chunks present) -- a behaviour change
-  needing design and tests, recorded as future work, not a knob
-  turned on this data.
+  0.50, so the LLM answers from them instead of refusing.
+- **Grade-based refusal, implemented 2026-10-26** (no longer future
+  work): the grade now requires score AND lexical coverage -- the
+  fraction of the original question's content tokens appearing in
+  the retrieved chunk texts (union; deterministic tokenizer with
+  stopwords removed and plural/gerund folding, both sides). After
+  the single rewrite, a still-poor grade routes to a refuse node
+  that answers the shared refusal with no LLM call at all, instead
+  of reasoning. Coverage is measured against the original question,
+  never the rewritten query. Measured basis, real Gemini retrieval
+  at chunk level over all 55 golden + 16 probes: golden coverage
+  min 0.75 / median 1.00; the 5 probes the live full run answered
+  all 0.00; threshold `RETRIEVAL_COVERAGE_THRESHOLD = 0.50` sits in
+  that gap. Two probes with in-corpus vocabulary (0.80, 1.00) still
+  pass coverage and are refused downstream by reasoning/verify, as
+  before -- coverage is a floor, not a proof of answerability.
+  Pinned by `tests/test_grade_refusal.py` (helper, grade branches,
+  graph-level refuse-without-reasoning and good-grade-still-reasons)
+  and a rewritten `test_phase_c` still-poor case.
+- **NOT yet claimed:** no new live refusal rate. The measurement
+  above predicts 16/16 on this corpus, but a live eval re-run with
+  the new graph is still pending (Gemini free-tier quota + ~100 min
+  runtime); until it runs, the shipped refusal figure stays the
+  measured 11/16 from the pre-change full run.
 - Injection: inj-04 failed in both 0.30 runs and passed in the 0.50
   variant; with n=6 that single flip is not evidence the threshold
   caused it.

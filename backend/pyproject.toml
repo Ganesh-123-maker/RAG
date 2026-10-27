@@ -23,6 +23,6 @@ fail_under = 80
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-# Phase G status: mypy is NOT clean (14 pre-existing errors, see
-# docs/phase-g-report.md). It runs as a non-blocking CI job until
-# those are fixed; this config must not be loosened to hide them.
+# mypy is clean since 2026-10-26 (14 Phase G errors fixed on the
+# remaining-completion branch) and runs as a blocking CI job.
+# This config must not be loosened to hide regressions.

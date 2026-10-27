@@ -394,7 +394,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
             )}
           </div>
           <p className="text-xs text-slate-600 text-center mt-2">
-            Answers are grounded in your documents · GPT-4o + Qdrant
+            Answers are grounded in your documents
           </p>
         </div>
       </div>

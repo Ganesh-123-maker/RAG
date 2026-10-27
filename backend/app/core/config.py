@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str | None = None
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # Refresh tokens: opaque, hashed in the DB, rotated on every use
+    # with reuse detection (see services/refresh_token_service.py).
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
@@ -71,6 +74,17 @@ class Settings(BaseSettings):
     # tuned optimum -- Phase D must measure grade thresholds before
     # claiming any of them is tuned.
     RETRIEVAL_GRADE_THRESHOLD: float = 0.50
+    # Grade-based refusal (2026-10-26): retrieval is also graded on
+    # lexical coverage -- the fraction of the ORIGINAL question's
+    # content tokens that appear in the retrieved chunk texts. Measured
+    # on the eval corpus (real Gemini retrieval, chunk level, with
+    # the implementation's own tokenizer): golden questions min 0.75
+    # / median 1.00, unanswerable probes that the live run answered
+    # all 0.00, so 0.50 sits in a real measured gap
+    # (see docs/EVALUATION.md). Two probes with in-corpus vocabulary
+    # (0.80, 1.00) still pass coverage and are refused downstream by
+    # reasoning/verify, as before -- coverage is a floor, not a proof.
+    RETRIEVAL_COVERAGE_THRESHOLD: float = 0.50
     RETRIEVAL_FETCH_K: int = 20
     MMR_LAMBDA: float = 0.7
     # Generation budgets (Phase B): context is truncated lowest-score
@@ -111,7 +125,10 @@ class Settings(BaseSettings):
         return v
 
     @field_validator(
-        "RETRIEVAL_SIMILARITY_THRESHOLD", "RETRIEVAL_GRADE_THRESHOLD", "MMR_LAMBDA"
+        "RETRIEVAL_SIMILARITY_THRESHOLD",
+        "RETRIEVAL_GRADE_THRESHOLD",
+        "RETRIEVAL_COVERAGE_THRESHOLD",
+        "MMR_LAMBDA",
     )
     @classmethod
     def _validate_unit(cls, v: float) -> float:
@@ -122,6 +139,7 @@ class Settings(BaseSettings):
     @field_validator(
         "MAX_UPLOAD_SIZE_MB",
         "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
+        "REFRESH_TOKEN_EXPIRE_DAYS",
         "RETRIEVAL_TOP_K",
         "RETRIEVAL_FETCH_K",
         "AUTH_RATE_LIMIT_PER_MINUTE",
@@ -203,4 +221,6 @@ def configure_logging(level: str = "INFO") -> None:
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # BaseSettings populates required fields (e.g. OPENAI_API_KEY)
+    # from the environment at construction; mypy cannot see that.
+    return Settings()  # type: ignore[call-arg]
