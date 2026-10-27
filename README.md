@@ -201,7 +201,7 @@ that matters here):
 | mypy | **clean** (blocking CI job since 2026-10-26) |
 | Bandit | 12 Low, 0 Medium, 0 High |
 | pip-audit | **3 records in 2 packages** after the 2026-10-26 upgrade (was 57 re-measured, 71 in Phase G); all 3 have no fixed release and are documented accepted risks, see `docs/SECURITY.md` |
-| npm audit | Not runnable in the sandbox (registry audit endpoint 403 by policy); no count claimed — verification is the non-blocking CI job, see docs/SECURITY.md |
+| npm audit | **2 vulnerabilities (1 moderate, 1 high)** measured in CI 2026-10-27, both PostCSS via Next's bundled copy; fix requires breaking Next 16 upgrade, so documented, not applied — see docs/SECURITY.md |
 | Docker builds / compose smoke | **not run in this sandbox (no Docker)**; covered by CI jobs (`docker-build`, `compose-smoke`) |
 
 Run the backend suite:

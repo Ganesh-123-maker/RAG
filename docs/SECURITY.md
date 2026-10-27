@@ -165,10 +165,16 @@ never auto-merged, for exactly this reason.
 
 Not runnable in this sandbox: the registry audit endpoint returns
 403 (`policy_denied`) -- a sandbox egress policy, not a clean
-result, so **no npm-audit count is claimed here**. It runs in CI
-as a non-blocking job (`frontend-security`,
-`--audit-level=moderate`); that CI run is the verification path
-for frontend vulnerabilities. What was done locally 2026-10-26:
+result. **Measured in CI instead** (PR #26, run 2026-10-27):
+**2 vulnerabilities (1 moderate, 1 high)**, both PostCSS
+advisories (GHSA-qx2v-qp2m-jg93, GHSA-6g55-p6wh-862q,
+GHSA-fxqj-rqcc-2cmp, GHSA-r28c-9q8g-f849) via the PostCSS copy
+bundled inside Next.js itself. The audit-suggested fix is
+`next@16.4.3`, a breaking major upgrade, so it is NOT applied
+here: the findings stay as a documented, non-blocking CI failure
+until a deliberate Next 16 upgrade, which needs its own testing.
+It runs in CI as a non-blocking job (`frontend-security`,
+`--audit-level=moderate`). What was done locally 2026-10-26:
 `npm update` within the existing `^` ranges (no `package.json`
 range changes, no major upgrades — Next.js stays on 15.x, React
 on 19.x as instructed). Almost nothing moved: Next.js was already
