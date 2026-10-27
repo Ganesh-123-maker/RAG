@@ -60,8 +60,84 @@ PLANNER_SYSTEM_PROMPT = (
     "You are a query planner for a retrieval-augmented generation system. "
     "Decide whether the user's question needs information from their uploaded "
     "documents, and if so rewrite it as a self-contained retrieval query. "
-    "Answer ONLY with the requested JSON object."
+    "Say needs_retrieval=false ONLY for greetings, farewells, thanks, or "
+    "small talk with no factual content. NEVER say false for a factual "
+    "question, even if you know the answer from general knowledge: this "
+    "assistant answers only from the user's documents, and a factual "
+    "question must go through retrieval so it can be refused when the "
+    "documents do not cover it. Answer ONLY with the requested JSON object."
 )
+
+
+def _normalize_for_guard(text: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace, for the
+    conversational guard below. Apostrophes survive so "how's" and
+    "what's" match their phrases."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", text.lower())).strip()
+
+
+def _starts_with_phrase(normalized: str, phrase: str) -> bool:
+    """Phrase match at a word boundary: "history" must not match "hi"."""
+    return normalized == phrase or normalized.startswith(phrase + " ")
+
+
+# Phrases that mark a message conversational even when it carries a
+# stray content token ("How are you doing today?" contains "today").
+_CONVERSATIONAL_PREFIXES = (
+    "hi",
+    "hello",
+    "hey",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "good night",
+    "bye",
+    "goodbye",
+    "thanks",
+    "thank you",
+    "how are you",
+    "how's it going",
+    "how is it going",
+    "what's up",
+    "whats up",
+    "how are things",
+    "how's life",
+)
+_CONVERSATIONAL_EXACT = frozenset({"help", "ok", "okay", "yes", "no", "sure"})
+# Questions about the assistant itself, not about any document or fact.
+_CONVERSATIONAL_META = (
+    "what can you do",
+    "who are you",
+    "what are you",
+    "how do you work",
+    "tell me about yourself",
+    "introduce yourself",
+)
+
+
+def is_conversational(question: str) -> bool:
+    """Deterministic conversational check for the direct branch.
+
+    The planner LLM is not reliable enough to own this decision: it
+    routed all 5 still-answered probes in the 2026-10-27 live re-run
+    to direct despite a prompt saying false is for greetings only.
+    So the guard below, not the planner's JSON, decides what may go
+    direct: greetings/small talk/meta, or a message with no content
+    tokens at all. Everything else is factual and must flow through
+    retrieval, where the grade can refuse it. A pathological input
+    like "Good morning, what is the capital of France?" matches a
+    greeting prefix and goes direct; that is accepted -- the guard
+    covers the clear cases, and the planner prompt covers the rest.
+    """
+    normalized = _normalize_for_guard(question)
+    if not normalized or normalized in _CONVERSATIONAL_EXACT:
+        return True
+    if any(_starts_with_phrase(normalized, p) for p in _CONVERSATIONAL_PREFIXES):
+        return True
+    if any(meta in normalized for meta in _CONVERSATIONAL_META):
+        return True
+    return not _coverage_tokens(question)
+
 
 REASONING_SYSTEM_PROMPT = (
     "You are a precise research assistant. Answer using ONLY the provided "
@@ -223,7 +299,10 @@ async def planner_node(state: AgentState) -> dict:
         f"Current question: {state['question']}\n\n"
         f"Tasks:\n"
         f"1. Decide if document retrieval is needed (true/false).\n"
-        f"   Say false ONLY for greetings or simple math with no document context.\n"
+        f"   Say false ONLY for greetings, farewells, thanks, or small talk\n"
+        f"   with no factual content. NEVER say false for a factual question,\n"
+        f"   even if you know the answer from general knowledge: this\n"
+        f"   assistant answers only from the user's documents.\n"
         f"2. If true, write a self-contained retrieval query (no pronouns, standalone).\n\n"
         f'Respond in JSON exactly:\n{{"needs_retrieval": true, "retrieval_query": "..."}}\n'
         f'or\n{{"needs_retrieval": false, "retrieval_query": ""}}'
@@ -247,6 +326,18 @@ async def planner_node(state: AgentState) -> dict:
         # OPEN to retrieval with the raw question: the worst case is an
         # unnecessary retrieval, never a silently wrong direct answer.
         logger.warning("Planner failed, defaulting to retrieval: %s", exc)
+        return {**state, **_fail_open_plan(state["question"])}
+
+    if not plan.needs_retrieval and not is_conversational(state["question"]):
+        # Deterministic guard (2026-10-27 live re-run diagnosis): the
+        # planner routed factual probes direct despite the prompt, and
+        # a direct answer bypasses retrieval, grading, and refusal
+        # entirely. Fail open to retrieval with the raw question, the
+        # same safe fallback as a planner failure: worst case is an
+        # unnecessary retrieval, never a pretraining answer.
+        logger.info(
+            "Planner direct overridden for factual question, routing to retrieval"
+        )
         return {**state, **_fail_open_plan(state["question"])}
 
     return {
