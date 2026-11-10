@@ -569,9 +569,8 @@
  {
   "answerable": true,
   "expected_keywords": [
-   "freezes",
-   "low-rank",
-   "rank r"
+   "frozen",
+   "trainable"
   ],
   "id": "ft-01",
   "question": "In LoRA fine-tuning, which weights are frozen and which are trained?",

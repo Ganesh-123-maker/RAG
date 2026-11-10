@@ -246,8 +246,8 @@ measures that configuration and must never be quoted as an OpenAI /
 GPT-4o result. Full discussion, run outputs, and the tuning decision:
 `docs/EVALUATION.md`.
 
-- **Corpus:** 10 self-written documents (`backend/eval/corpus/`, TXT /
-  MD / PDF / DOCX), 55 golden questions, 16 unanswerable probes,
+- **Corpus:** 20 self-written documents (`backend/eval/corpus/`, TXT /
+  MD / PDF / DOCX), 75 golden questions, 16 unanswerable probes,
   6 prompt-injection probes. See `backend/eval/README.md`.
 - **Full live run** (`docs/eval/gemini-live-full/`, 55 golden):
   hit@1 = 1.0, hit@3 = 1.0, hit@5 = 1.0, MRR = 1.0; citation
@@ -273,16 +273,27 @@ GPT-4o result. Full discussion, run outputs, and the tuning decision:
   text), injection 1.0 (6/6), judge 55/55, latency p50 2.3s.
   un-16 now refuses exactly; the one remaining miss is un-15's
   hedged answer (no refusal marker), not a routing bypass.
-- **Honest limits:** the corpus is small and the golden questions
-  were written against it, so perfect retrieval proves the pipeline
-  end to end, not general quality on a large corpus. Refusal was
-  the weak metric (0.50–0.6875 across early runs) and still wobbles
-  run to run on identical probes. Raising the similarity threshold
-  0.30 → 0.50 was tested (`docs/eval/gemini-live-limit20-threshold050/`)
-  and did **not** improve refusal (8/16 vs 9/16), so the production
-  default stays at 0.30. Grade-based refusal (2026-10-26) and the
-  deterministic planner direct-branch guard (2026-10-27) are now
-  shipped and measured at 15/16, not future fixes.
+- **Latest live run, hedged-answer rule + expanded corpus**
+  (`docs/eval/gemini-live-full-expanded-1/`, 75 golden, 20 docs,
+  2026-11-10): hit@1/3/5 = 1.0, citation precision 1.0,
+  faithfulness 0.9956, refusal 1.0 (16/16, all exact refusal
+  text), injection 1.0 (6/6), judge 72/73 evaluated, latency
+  p50 3.6s. The one judge miss (ft-01) is an over-strict keyword
+  list in my own golden, not a wrong answer; two goldens went
+  unevaluated on judge 503s.
+- **Honest limits:** the corpus is small (20 docs) and the golden
+  questions were written against it, so perfect retrieval proves
+  the pipeline end to end, not general quality on a large corpus.
+  Refusal was the weak metric (0.50–0.6875 across early runs) and
+  still wobbles run to run on identical probes; it now measures
+  16/16 after three targeted fixes. Raising the similarity
+  threshold 0.30 → 0.50 was tested
+  (`docs/eval/gemini-live-limit20-threshold050/`) and did **not**
+  improve refusal (8/16 vs 9/16), so the production default stays
+  at 0.30. Grade-based refusal (2026-10-26), the deterministic
+  planner direct-branch guard (2026-10-27), the specific-number
+  grade bar (2026-10-27), and the hedged-answer rule (2026-11-10)
+  are all shipped and measured, not future fixes.
 - **Offline smoke results (labelled as such):** `docs/eval/offline-smoke-1/`
   (current config, threshold 0.30) and
   `docs/eval/offline-smoke-threshold-off/` (threshold 0.0). The
