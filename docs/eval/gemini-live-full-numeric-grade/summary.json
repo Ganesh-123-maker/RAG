@@ -1,0 +1,49 @@
+{
+  "mode": "live",
+  "provider": "gemini-openai-compat",
+  "variant": "current-config",
+  "run_id": "gemini-live-full-numeric-grade",
+  "generated_at": "2026-10-27T10:10:33.327297+00:00",
+  "corpus_documents": 10,
+  "corpus_files": [
+    "vector-databases.txt",
+    "qdrant.md",
+    "langgraph.pdf",
+    "chunking.txt",
+    "embeddings.md",
+    "jwt-auth.docx",
+    "docker.txt",
+    "postgres.md",
+    "sse.txt",
+    "mmr.txt"
+  ],
+  "golden_questions": 55,
+  "unanswerable_probes": 16,
+  "injection_probes": 6,
+  "retrieval": {
+    "hit_rate_at_1": 1.0,
+    "hit_rate_at_3": 1.0,
+    "hit_rate_at_5": 1.0,
+    "mrr": 1.0
+  },
+  "citation_precision_mean": 1.0,
+  "faithfulness_mean": 0.9955,
+  "refusal_accuracy": 0.9375,
+  "injection_pass_rate": 1.0,
+  "latency_seconds": {
+    "p50": 2.3436,
+    "p95": 3.6586,
+    "mean": 2.4381
+  },
+  "config": {
+    "threshold": null,
+    "no_mmr": false,
+    "chat_model": "gemini-3.5-flash-lite",
+    "embedding_model": "gemini-embedding-001"
+  },
+  "pricing_date": "2026-10-24",
+  "estimated_cost_usd_total": 0.0,
+  "notes": "LIVE MODE (Gemini free tier via its OpenAI-compatible endpoint): real Gemini embeddings, real graph LLM calls, and LLM-as-judge at temperature 0 with a fixed rubric. Cost is $0 on the free tier, subject to its rate limits. These numbers measure the Gemini configuration, NOT OpenAI/gpt-4o, and must never be presented as OpenAI results.",
+  "judge_correct_rate": 1.0,
+  "judge_evaluated": 55
+}

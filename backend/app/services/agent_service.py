@@ -521,23 +521,100 @@ def chunk_coverage(question: str, chunks: list[dict]) -> float:
     return hits / len(question_tokens)
 
 
+# Numbers that pin a question to a specific scale. Canonical value is
+# the number after expanding a magnitude word; a number counts as
+# specific at 1000 or above, which keeps small question numbers (512
+# tokens, top 5, lambda 1.0) exempt while catching scales like years
+# and "100 million". Measured on the eval set 2026-10-27: no golden
+# question carries a specific number, so this bar touches no golden;
+# it touches exactly the two probes that carry one (un-08's 2024,
+# un-16's 100 million).
+_NUMBER_MAGNITUDES = {"thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000}
+_NUMBER_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*(thousands?|millions?|billions?)?\s*(%)?"
+)
+_SPECIFIC_NUMBER_THRESHOLD = 1000
+
+
+def _canonical_numbers(text: str) -> set[float]:
+    """All numbers in a text as canonical floats, magnitude-expanded.
+
+    A trailing % is recorded twice: as the percent itself (97) and as
+    its fraction (0.97), so "97%" in a question matches "0.97" in a
+    chunk and vice versa. Commas are stripped; "12 million" becomes
+    12000000.0. Word forms without digits ("a hundred") are not
+    numbers for this check -- the corpus questions all use digits.
+    """
+    values: set[float] = set()
+    for raw, magnitude, percent in _NUMBER_RE.findall(text):
+        try:
+            value = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        if magnitude:
+            value *= _NUMBER_MAGNITUDES[magnitude.rstrip("s")]
+        values.add(value)
+        if percent:
+            values.add(value / 100.0 if value > 1 else value * 100.0)
+    return values
+
+
+def missing_specific_numbers(question: str, chunks: list[dict]) -> list[float]:
+    """Specific numbers from the question absent from ALL retrieved
+    chunk texts (union). Empty when the question carries no specific
+    number, or when every one is covered.
+
+    This is a grade bar, not a verify bar, and the distinction is
+    load-bearing: un-16's answer numbers (12 million, 0.97) ARE in
+    its cited chunk, so no answer-side check could catch it. The
+    leak is question-side -- the asked scale (100 million) is absent
+    from the evidence, and the model filled the gap with the nearby
+    12-million figure plus a disclaimer instead of refusing. Lexical
+    coverage cannot see it either: "million" matches the 12-million
+    chunk, so coverage passes while the scale does not.
+    """
+    chunk_numbers: set[float] = set()
+    for chunk in chunks:
+        chunk_numbers |= _canonical_numbers(str(chunk.get("text", "")))
+    missing: list[float] = []
+    for raw, magnitude, percent in _NUMBER_RE.findall(question):
+        try:
+            value = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        if magnitude:
+            value *= _NUMBER_MAGNITUDES[magnitude.rstrip("s")]
+        if value < _SPECIFIC_NUMBER_THRESHOLD:
+            continue
+        # A percent question is covered by either form: "1500%" is
+        # covered by a chunk saying "15" as well as one saying
+        # "1500" -- without this, every large percent would be a
+        # false missing. (Plain percent equivalence below 1000 never
+        # reaches this bar, so it needs no special case.)
+        candidates = {value} | ({value / 100.0} if percent else set())
+        if not candidates & chunk_numbers:
+            missing.append(value)
+    return sorted(missing)
+
+
 async def grade_retrieval_node(state: AgentState) -> dict:
     """Score + coverage retrieval grade (deterministic, no LLM call).
 
-    "good" requires all three: at least one chunk, a top score at or
-    above ``RETRIEVAL_GRADE_THRESHOLD``, AND coverage of the ORIGINAL
-    question at or above ``RETRIEVAL_COVERAGE_THRESHOLD``. Coverage is
-    measured against ``state["question"]``, never the rewritten query:
-    after a rewrite the query's tokens are the rewriter's, not the
-    user's, and grading against them would let a rewrite launder a
-    probe into a pass. Search already drops chunks below
-    ``RETRIEVAL_SIMILARITY_THRESHOLD`` (0.30), so the grade threshold
-    (0.50) is the stricter score bar; coverage is the second bar that
-    score alone could not provide -- the 0.50 score variant did not
-    improve refusal because out-of-corpus probes still retrieve
-    topically related chunks above 0.50. No LLM relevance grading is
-    used: it would add cost, latency, and a non-deterministic grade
-    that graph tests could not pin down.
+    "good" requires all four: at least one chunk, a top score at or
+    above ``RETRIEVAL_GRADE_THRESHOLD``, coverage of the ORIGINAL
+    question at or above ``RETRIEVAL_COVERAGE_THRESHOLD``, AND no
+    missing specific question number (see ``missing_specific_numbers``).
+    Coverage is measured against ``state["question"]``, never the
+    rewritten query: after a rewrite the query's tokens are the
+    rewriter's, not the user's, and grading against them would let a
+    rewrite launder a probe into a pass. Search already drops chunks
+    below ``RETRIEVAL_SIMILARITY_THRESHOLD`` (0.30), so the grade
+    threshold (0.50) is the stricter score bar; coverage is the
+    second bar that score alone could not provide -- the 0.50 score
+    variant did not improve refusal because out-of-corpus probes
+    still retrieve topically related chunks above 0.50. No LLM
+    relevance grading is used: it would add cost, latency, and a
+    non-deterministic grade that graph tests could not pin down.
     """
     _emit_status(state, "grading")
     chunks = state.get("chunks") or []
@@ -559,6 +636,14 @@ async def grade_retrieval_node(state: AgentState) -> dict:
     if coverage < coverage_threshold:
         failures.append(
             f"coverage {coverage:.2f} below coverage threshold {coverage_threshold:.2f}"
+        )
+    missing = missing_specific_numbers(str(state.get("question", "")), chunks)
+    if missing:
+        failures.append(
+            "specific question number(s) absent from retrieved chunks: "
+            + ", ".join(
+                f"{v:,.0f}" if float(v).is_integer() else f"{v:g}" for v in missing
+            )
         )
     if failures:
         return {

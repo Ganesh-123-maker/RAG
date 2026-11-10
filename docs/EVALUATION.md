@@ -104,6 +104,7 @@ and a Gemini daily quota exhaustion, via per-question checkpointing
 | `gemini-live-full` (55 golden, threshold 0.30) | 1.0 | 1.0 | 1.0 | 1.0 | 0.9623 | 0.9636 | 0.6875 (11/16) | 0.8333 (5/6) | 52/54 (mmr-02 judge 503'd; wrong: vec-05, sse-02) | 9.98s / 78.46s |
 | `gemini-live-limit20-threshold050` (20 golden, threshold 0.50) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.50 (8/16) | 1.0 (6/6) | 16/16 evaluated (4 judge calls 503'd: qdr-01/02/05/06) | 13.08s / 181.86s |
 | `gemini-live-full-planner-fix` (55 golden, grade + planner guard) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9955 | 0.9375 (15/16; 14/16 exact refusal text) | 1.0 (6/6) | 53/55 (wrong: doc-04, doc-05, both golden refusals) | 2.47s / 6.93s |
+| `gemini-live-full-numeric-grade` (55 golden, + specific-number grade bar) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9955 | 0.9375 (15/16, all exact refusal text) | 1.0 (6/6) | 55/55 | 2.34s / 3.66s |
 
 Raw outputs: `docs/eval/gemini-live-limit20/`,
 `docs/eval/gemini-live-full/`,
@@ -222,6 +223,39 @@ What these runs teach, and what they do not:
     refusals. Judge 53/55 matches the previous run's count.
   - Shipped refusal figure is now 15/16 (runner rule) / 14/16
     exact text. Do not quote 16/16: un-16 is a measured miss.
+- **Specific-number grade bar + live re-run, 2026-10-27**
+  (`docs/eval/gemini-live-full-numeric-grade/`, Gemini free tier,
+  same 55+16+6 set, ~43 min, exit 0): **refusal 15/16 (0.9375),
+  now all 15 exact refusal text**. Hit@1/3/5 still 1.0, citation
+  1.0, faithfulness 0.9955, judge 55/55, injection 6/6, latency
+  p50 2.34s / p95 3.66s. The bar is a fourth grade condition in
+  `grade_retrieval_node` (`missing_specific_numbers` in
+  `agent_service.py`): a question number at or above 1000 after
+  magnitude expansion ("100 million" -> 100,000,000) that appears
+  in no retrieved chunk grades poor, so after the rewrite the
+  graph refuses without an LLM call. It is deliberately a grade
+  bar, not a verify bar: un-16's answer numbers (12 million,
+  0.97) ARE in its cited chunk, so no answer-side check could
+  catch it -- the leak was question-side, an asked scale absent
+  from the evidence, which lexical coverage also misses because
+  "million" matches the 12-million chunk. Pinned by
+  `tests/test_numeric_grade.py`.
+  - un-16 now refuses with the exact text. That is the fix
+    working, not a metric change: the runner's rule is unchanged.
+  - The headline stays 15/16 because the miss moved, not because
+    the fix failed: un-15 (Qdrant replication factor for a
+    cluster in Antarctica) is now the only answered probe, with a
+    hedged answer ("no mention of an Antarctic cluster" plus the
+    guide's replication factor 2) that carries no refusal marker.
+    It is a reasoning judgement call on an in-corpus-vocabulary
+    probe, same class as before.
+  - Golden refusals are 0 this run (was 2) and judge 55/55 (was
+    53/55). Do NOT credit the grade bar for that: no golden
+    question carries a specific number, so the bar cannot affect
+    any golden -- this is run-to-run LLM variation in
+    reasoning/verify, in the favorable direction.
+  - Shipped refusal figure is now 15/16 exact text. Do not quote
+    16/16: un-15 is a measured miss.
 - Injection: inj-04 failed in both 0.30 runs and passed in the 0.50
   variant; with n=6 that single flip is not evidence the threshold
   caused it.
