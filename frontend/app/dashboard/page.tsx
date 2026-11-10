@@ -259,7 +259,7 @@ export default function DashboardPage() {
             <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-xs text-slate-500 mt-1 truncate">{userEmail}</p>
+        <p className="text-xs text-slate-400 mt-1 truncate">{userEmail}</p>
       </div>
 
       <nav className="p-4 space-y-1 flex-1 overflow-y-auto" aria-label="Main navigation">
@@ -293,7 +293,7 @@ export default function DashboardPage() {
         </button>
 
         <div className="pt-4">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-3 mb-2">
             Recent chats
           </p>
           {convsError ? (
@@ -304,7 +304,7 @@ export default function DashboardPage() {
               </button>
             </div>
           ) : conversations.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-slate-500">No conversations yet — start a new chat.</p>
+            <p className="px-3 py-2 text-sm text-slate-400">No conversations yet — start a new chat.</p>
           ) : (
             <>
               {conversations.slice(0, visibleConvCount).map((conv) => (
@@ -343,7 +343,7 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setRenamingId(conv.id); setRenameValue(conv.title); }}
-                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 hover:text-brand-300 transition-opacity text-slate-500"
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 hover:text-brand-300 transition-opacity text-slate-400"
                           aria-label={`Rename conversation ${conv.title}`}
                           title="Rename conversation"
                         >
@@ -352,7 +352,7 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={(e) => deleteConversation(e, conv.id)}
-                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 hover:text-red-400 transition-opacity text-slate-500"
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 hover:text-red-400 transition-opacity text-slate-400"
                           aria-label={`Delete conversation ${conv.title}`}
                           title="Delete conversation"
                         >
@@ -445,13 +445,13 @@ export default function DashboardPage() {
                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${
                         isDragActive ? "bg-brand-600/20" : "bg-surface"
                       }`}>
-                        <Upload className={`w-7 h-7 ${isDragActive ? "text-brand-400" : "text-slate-500"}`} />
+                        <Upload className={`w-7 h-7 ${isDragActive ? "text-brand-400" : "text-slate-400"}`} />
                       </div>
                       <div>
                         <p className="font-semibold text-slate-200">
                           {isDragActive ? "Drop it here!" : "Drop a file or click to upload"}
                         </p>
-                        <p className="text-slate-500 text-sm mt-1">PDF · DOCX · TXT · MD · Max 50 MB</p>
+                        <p className="text-slate-400 text-sm mt-1">PDF · DOCX · TXT · MD · Max 50 MB</p>
                       </div>
                     </>
                   )}
@@ -469,7 +469,7 @@ export default function DashboardPage() {
                 <div className="card p-12 text-center">
                   <FileText className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                   <p className="text-slate-400 text-lg font-medium">No documents yet</p>
-                  <p className="text-slate-500 text-sm mt-1">Upload your first document above to get started</p>
+                  <p className="text-slate-400 text-sm mt-1">Upload your first document above to get started</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -480,7 +480,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-slate-200 truncate">{doc.original_name}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">
+                        <p className="text-xs text-slate-400 mt-0.5">
                           {formatBytes(doc.file_size_bytes)} · {doc.chunk_count} chunks ·{" "}
                           {new Date(doc.created_at).toLocaleDateString()}
                         </p>

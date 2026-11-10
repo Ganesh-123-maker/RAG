@@ -83,7 +83,7 @@
   /* Form inputs */
   .input {
     @apply w-full px-4 py-3 rounded-xl bg-surface border border-surface-border
-           text-slate-100 placeholder-slate-500
+           text-slate-100 placeholder-slate-400
            focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/50
            transition-all duration-200 text-sm;
   }

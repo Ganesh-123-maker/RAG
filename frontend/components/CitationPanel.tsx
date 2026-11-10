@@ -44,22 +44,22 @@ export default function CitationPanel({ citation, index, onClose }: CitationPane
         </div>
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex gap-2">
-            <dt className="text-slate-500 w-20 flex-shrink-0">Chunk</dt>
+            <dt className="text-slate-400 w-20 flex-shrink-0">Chunk</dt>
             <dd className="text-slate-200">
               {citation.chunk_index}
-              {citation.chunk_id ? <span className="text-slate-500 font-mono text-xs"> · {citation.chunk_id}</span> : null}
+              {citation.chunk_id ? <span className="text-slate-400 font-mono text-xs"> · {citation.chunk_id}</span> : null}
             </dd>
           </div>
           <div className="flex gap-2">
-            <dt className="text-slate-500 w-20 flex-shrink-0">Page</dt>
+            <dt className="text-slate-400 w-20 flex-shrink-0">Page</dt>
             <dd className="text-slate-200">{citation.page != null ? `Page ${citation.page}` : "Not recorded"}</dd>
           </div>
           <div className="flex gap-2">
-            <dt className="text-slate-500 w-20 flex-shrink-0">Section</dt>
+            <dt className="text-slate-400 w-20 flex-shrink-0">Section</dt>
             <dd className="text-slate-200">{citation.section || "Not recorded"}</dd>
           </div>
           <div className="flex gap-2">
-            <dt className="text-slate-500 w-20 flex-shrink-0">Score</dt>
+            <dt className="text-slate-400 w-20 flex-shrink-0">Score</dt>
             <dd className="text-slate-200">{(citation.score * 100).toFixed(0)}% match</dd>
           </div>
         </dl>

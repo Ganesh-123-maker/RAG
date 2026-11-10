@@ -1,0 +1,9 @@
+TypeScript Types: Interfaces, Aliases, and Structural Typing
+
+TypeScript adds static types to JavaScript. The two ways to name an object shape are interfaces and type aliases, and they overlap heavily: both can describe an object with named fields. The differences are narrow but real. An interface can be reopened and extended later -- declaring the same interface twice merges the fields, which is how libraries let users add properties. A type alias cannot be reopened; redeclaring it is an error. Conversely, a type alias can name anything: unions, tuples, primitives, and mapped types, while an interface can only describe object shapes. The practical rule is to use interfaces for public object shapes that others may extend, and type aliases for unions and everything else.
+
+Generics let types take parameters. A function like function first<T>(items: T[]): T works for any element type, and the caller never writes the type argument explicitly -- TypeScript infers T from the argument. Generic constraints narrow what T can be: T extends { id: string } requires the element to carry an id field.
+
+TypeScript uses structural typing: two types are compatible when they have the same shape, regardless of their names. A function expecting { name: string } accepts any object with a name field, even if that object was declared as a completely different type. This is the opposite of nominal typing, where a name match is required. Structural typing is why plain JavaScript objects slide into TypeScript APIs without ceremony.
+
+Strict mode, enabled by "strict": true in tsconfig.json, turns on the checks that make TypeScript actually strict: noImplicitAny rejects parameters with no inferable type, and strictNullChecks makes null and undefined distinct from every other type, so a string | null must be narrowed before use. Projects that skip strict mode get little more than documentation from their types.

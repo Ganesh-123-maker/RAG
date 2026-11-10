@@ -257,21 +257,15 @@ async def run_evaluation(cfg: dict) -> dict:
         if mode == "live":
             from app.services.chunking_service import extract_text
 
-            ext_by_file = {
-                "vector-databases.txt": "txt",
-                "qdrant.md": "md",
-                "langgraph.pdf": "pdf",
-                "chunking.txt": "txt",
-                "embeddings.md": "md",
-                "jwt-auth.docx": "docx",
-                "docker.txt": "txt",
-                "postgres.md": "md",
-                "sse.txt": "txt",
-                "mmr.txt": "txt",
-            }
+            # Extension derived from the filename, not a hardcoded map:
+            # the corpus grew past the original 10 files (20 docs since
+            # 2026-11-10) and a hardcoded map KeyErrored on the first
+            # new file. extract_text raises on unknown extensions, so
+            # an unsupported format still fails loudly here.
             for filename in manifest:
+                ext = filename.rsplit(".", 1)[-1].lower()
                 source_text_by_file[filename] = extract_text(
-                    (corpus_dir / filename).read_bytes(), ext_by_file[filename]
+                    (corpus_dir / filename).read_bytes(), ext
                 )
 
         async def ask(question: str) -> dict:

@@ -1,0 +1,9 @@
+GitHub Actions: Workflows, Jobs, and Runners
+
+GitHub Actions automates build, test, and deploy steps directly from a repository. A workflow is a YAML file that lives in the .github/workflows directory of the repo. Each file defines one workflow, and a repository can hold many. A workflow is triggered by events: push to a branch, a pull_request being opened, a schedule, or a manual dispatch from the Actions tab.
+
+A workflow is made of jobs. Jobs run in parallel by default; a job can declare needs on another job to force ordering. Each job runs on a runner, a machine that executes the steps. GitHub provides hosted runners, the most common being ubuntu-latest, windows-latest, and macos-latest, or a team can register self-hosted runners on its own machines. A job is a sequence of steps, and each step is either a shell command (run) or a reusable action (uses), such as actions/checkout to fetch the repository code or actions/setup-python to install a Python version.
+
+Secrets are the way workflows handle credentials. A secret is stored in the repository or organization settings and referenced as secrets.NAME in the workflow file. Secrets are masked in logs, and a step that prints one will see asterisks instead of the value. Secrets are never available to workflows triggered by pull requests from forked repositories, which is a deliberate guard against exfiltration.
+
+A typical CI workflow has three jobs: lint, test, and build, each running on push and pull_request. The test job checks out the code, sets up the language runtime, installs dependencies, and runs the test suite, failing the workflow if any test fails. Status checks on a pull request then block merging until the workflow passes, which is how CI becomes a gate rather than a report.

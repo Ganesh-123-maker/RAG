@@ -149,8 +149,10 @@ REASONING_SYSTEM_PROMPT = (
     "Cite ONLY chunks you actually used, using the id shown in each "
     "<context> block. End your response with:\n\nCITATIONS:\n"
     "[chunk-id] document_name, chunk N\n[chunk-id] document_name, chunk N\n"
-    "If the context does not contain enough information to answer, say so "
-    "honestly instead of inventing an answer or a citation."
+    "If the context does not contain the exact information asked for, reply "
+    "with exactly this sentence and nothing else: I couldn't find relevant "
+    "information in your documents. Do not answer with a nearby or related "
+    "figure instead, and do not add a disclaimer plus the related figure."
 )
 
 DIRECT_SYSTEM_PROMPT = (
@@ -726,6 +728,44 @@ async def rewrite_query_node(state: AgentState) -> dict:
     }
 
 
+# Phrases in which a reasoning answer admits the evidence lacks the
+# asked thing. Measured 2026-10-27 on the latest live run: no golden
+# answer contains any of these, and the only answered probe that does
+# is un-15 ("there is no mention of an Antarctic cluster" + the
+# guide's replication factor 2). A docs-only assistant refuses
+# instead of hedging, so verify normalizes such an answer to the
+# exact refusal text rather than letting the hedged answer through.
+_ABSENCE_ADMISSION_PHRASES = (
+    "no mention",
+    "does not mention",
+    "do not mention",
+    "is not mentioned",
+    "are not mentioned",
+    "does not contain",
+    "do not contain",
+    "does not provide",
+    "do not provide",
+    "not provided",
+    "is not provided",
+    "no information about",
+    "no relevant information",
+    "couldn't find",
+    "could not find",
+    "not contain enough information",
+    "no record of",
+    "not covered in",
+)
+
+
+def _admits_absence(answer: str) -> bool:
+    """True when a reasoning answer admits the documents lack the
+    asked information -- the hedged-answer shape (un-15), as opposed
+    to a grounded answer. The exact refusal text itself also
+    matches, by design; callers check for it first."""
+    lowered = answer.lower()
+    return any(phrase in lowered for phrase in _ABSENCE_ADMISSION_PHRASES)
+
+
 def _verify_tokens(text: str) -> set[str]:
     import re
 
@@ -797,6 +837,19 @@ async def verify_node(state: AgentState) -> dict:
         return {**state, "verify_result": "skipped"}
     if state["answer"].strip() == REFUSAL_TEXT:
         return {**state, "verify_result": "skipped"}
+    if _admits_absence(state["answer"]):
+        # Hedged answer (un-15): the model said the evidence lacks
+        # the asked thing and answered with a related figure anyway.
+        # Normalize to the exact refusal text instead of passing a
+        # half-answer through verification. The prompt now asks for
+        # this directly; this rule guarantees it deterministically.
+        logger.info("Reasoning answer admitted absence; normalizing to refusal")
+        return {
+            **state,
+            "answer": REFUSAL_TEXT,
+            "citations": [],
+            "verify_result": "skipped",
+        }
     passed, reason = _verify_support(state["answer"], state["chunks"])
     errors = list(state.get("errors") or [])
     if passed:

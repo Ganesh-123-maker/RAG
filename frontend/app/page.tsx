@@ -134,7 +134,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="border-t border-surface-border py-8 text-center text-slate-500 text-sm">
+      <footer className="border-t border-surface-border py-8 text-center text-slate-400 text-sm">
         RAG Knowledge Assistant · Built with Next.js, FastAPI and Qdrant
       </footer>
     </div>

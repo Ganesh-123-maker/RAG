@@ -1,0 +1,9 @@
+Redis Caching: Patterns and Eviction
+
+Redis is an in-memory data store often used as a cache in front of a slower database. The most common pattern is cache-aside, also called lazy loading. On a read, the application first asks Redis for the key. On a cache hit it returns the value immediately. On a cache miss it reads the database, writes the result into Redis with a time-to-live (TTL), and then returns it. Writes go to the database first, and the application then deletes the cached key so the next read reloads fresh data; updating the cache on write instead risks serving stale data if the write and the cache update disagree.
+
+Every cached key should carry a TTL. Without one, keys accumulate until memory fills, and a cache that never expires is a stale-data bug waiting to happen. Typical TTLs are minutes for fast-changing data and hours for reference data.
+
+When memory fills, Redis evicts keys according to the maxmemory policy. The default policy is noeviction: once the memory limit is reached, write commands fail with an out-of-memory error rather than deleting anything. The policy most caches actually want is allkeys-lru, which evicts the least recently used keys across all keys. There is also volatile-lru, which evicts only keys that have a TTL set, and allkeys-random, which evicts arbitrary keys.
+
+Redis can persist data two ways. RDB snapshots write the whole dataset to disk at intervals, which is compact and fast to reload but can lose minutes of writes on a crash. AOF, the append-only file, logs every write command and can be configured to fsync every second, losing at most a second of writes, at the cost of larger files and slower restarts. Most caches disable persistence entirely: if the cache is lost, it refills from the database.

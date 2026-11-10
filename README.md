@@ -18,6 +18,20 @@
 
 ---
 
+## 📈 Measured results
+
+Latest live run, 27 Oct 2026 (`docs/eval/gemini-live-full-numeric-grade/`), Gemini free tier (chat `gemini-3.5-flash-lite`, embeddings `gemini-embedding-001`), 10 self-written documents, 55 golden questions, 16 unanswerable probes, 6 injection probes:
+
+- Retrieval hit@1 / hit@3 / hit@5 = 1.0, MRR 1.0
+- Citation precision 1.0; faithfulness 0.9955 — answers grounded in retrieved sources (first full live run: 0.9636)
+- Refusal accuracy 0.9375 (15/16); prompt-injection pass 1.0 (6/6)
+- LLM judge 55/55 correct; latency p50 2.3s, p95 3.7s (first full live run p50 10.0s)
+- Tests: 179 backend tests passed, 90% coverage (CI gate 80%); 17 frontend Vitest passed; Playwright E2E 1 passed
+
+Earlier live runs and the full method are in [Evaluation](#-evaluation) and `docs/EVALUATION.md`. No production deployment exists yet, so no live-traffic or load numbers are claimed.
+
+---
+
 ## 🌐 Deployment status
 
 > **Live deployment: NOT YET DEPLOYED.** No live URL is claimed. The

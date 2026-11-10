@@ -1,1 +1,25 @@
-{"documents":["vector-databases.txt","qdrant.md","langgraph.pdf","chunking.txt","embeddings.md","jwt-auth.docx","docker.txt","postgres.md","sse.txt","mmr.txt"],"note":"langgraph_source.txt and jwt-auth_source.txt are generator inputs, NOT corpus documents. They are not ingested; langgraph.pdf and jwt-auth.docx are."}
+{
+ "documents": [
+  "vector-databases.txt",
+  "qdrant.md",
+  "langgraph.pdf",
+  "chunking.txt",
+  "embeddings.md",
+  "jwt-auth.docx",
+  "docker.txt",
+  "postgres.md",
+  "sse.txt",
+  "mmr.txt",
+  "transformer-attention.txt",
+  "fine-tuning-llm.md",
+  "redis-caching.txt",
+  "kafka-queues.md",
+  "github-actions-ci.txt",
+  "rest-api-design.md",
+  "oauth2-flows.txt",
+  "pytest-testing.md",
+  "typescript-types.txt",
+  "kubernetes-basics.md"
+ ],
+ "note": "langgraph_source.txt and jwt-auth_source.txt are generator inputs, NOT corpus documents. They are not ingested; langgraph.pdf and jwt-auth.docx are."
+}
