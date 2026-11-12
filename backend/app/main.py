@@ -61,6 +61,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await vs.ensure_collection()
     logger.info("Vector store collection ready: %s", settings.QDRANT_COLLECTION)
 
+    # Phase 2: reload the persistent access-token denylist into
+    # memory (logout revocations must survive restarts). Best-effort:
+    # a missing table (pre-migration DB) only logs a warning.
+    try:
+        from app.core.token_denylist import load_into_memory
+
+        async with AsyncSessionLocal() as session:
+            counts = await load_into_memory(session)
+        logger.info("Access-token denylist loaded: %s", counts)
+    except Exception as exc:  # noqa: BLE001 -- denylist load must never break boot
+        logger.warning("Access-token denylist load skipped: %s", exc)
+
     # Startup recovery: a restart wipes the volatile :memory: vector
     # store while the DB still says 'ready', leaving documents that
     # refuse every question and cannot be fixed by re-upload (dedupe
@@ -130,8 +142,14 @@ app.include_router(chat.router, prefix="/api/v1")
 
 
 async def _check_database() -> None:
+    # SELECT 1 proves the connection, not the schema: a backend
+    # started before `alembic upgrade head` would report ready while
+    # every request 500s (proven in Phase 1: the worker crashed with
+    # "no such table: documents"). The alembic_version table only
+    # exists after migrations, so require it too.
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
+        await conn.execute(text("SELECT 1 FROM alembic_version LIMIT 1"))
 
 
 async def _check_qdrant() -> None:

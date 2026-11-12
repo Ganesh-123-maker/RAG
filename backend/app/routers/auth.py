@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +18,7 @@ from app.core.security import (
     set_auth_cookie,
     set_refresh_cookie,
 )
-from app.core.token_denylist import revoke
+from app.core.token_denylist import revoke_persisted
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import RegisterRequest, TokenResponse, UserResponse
 from app.services.auth_service import AuthService
@@ -147,7 +149,18 @@ async def logout(
         try:
             payload = decode_access_token(token)
             if payload.get("jti"):
-                revoke(payload["jti"])
+                # Persist the revocation (DB-backed denylist, Phase 2):
+                # the in-memory set alone is cleared on restart, so a
+                # logged-out token was accepted again after a restart.
+                # exp is a unix timestamp; fall back to now + 60 min
+                # if the token carries no expiry.
+                exp = payload.get("exp")
+                expires_at = (
+                    datetime.fromtimestamp(exp, tz=UTC)
+                    if isinstance(exp, (int, float))
+                    else datetime.now(UTC) + timedelta(minutes=60)
+                )
+                await revoke_persisted(db, payload["jti"], expires_at)
         except Exception:  # noqa: BLE001, S110 -- logout must succeed even if the token is already invalid
             pass
     raw_refresh = request.cookies.get("refresh_token")
