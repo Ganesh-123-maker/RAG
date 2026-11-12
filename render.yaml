@@ -1,6 +1,7 @@
-# Render deployment (Phase G) -- backend only. Frontend deploys to
-# Vercel (see docs/DEPLOYMENT.md); Vercel needs no config file for
-# Next.js, so there is deliberately no vercel.json in this repo.
+# Render deployment (Phase G) -- backend web service + background
+# worker (Phase 2). Frontend deploys to Vercel (see
+# docs/DEPLOYMENT.md); Vercel needs no config file for Next.js, so
+# there is deliberately no vercel.json in this repo.
 #
 # Why Render, and what it does NOT do by itself:
 # - Render's `fromDatabase` connection string uses the `postgres://`
@@ -43,6 +44,38 @@ services:
         value: "https://rag-assistant-nine.vercel.app"
         # Replace with the actual Vercel URL once the frontend exists;
         # production startup rejects '*' in CORS origins (see config.py).
+
+  # Background worker (Phase 2): there was no worker service before,
+  # so queued documents had no recovery path in production. Same
+  # image as the web service; dockerCommand replaces the Dockerfile
+  # CMD (entrypoint.sh), so this service does NOT run migrations —
+  # the web service owns `alembic upgrade head` at boot. The worker
+  # only polls for queued rows and re-indexes them.
+  - type: worker
+    name: rag-worker
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerCommand: python scripts/run_ingestion_worker.py --loop --interval 30
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # Same scheme fix as the web service (see the header comment):
+      # the fromDatabase URL uses postgres:// — edit this service's
+      # DATABASE_URL in the dashboard to postgresql+asyncpg:// too.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rag-postgres
+          property: connectionString
+      - key: QDRANT_HOST
+        sync: false
+      - key: QDRANT_PORT
+        value: "443"
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
 
 databases:
   - name: rag-postgres
