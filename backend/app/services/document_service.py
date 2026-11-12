@@ -216,6 +216,7 @@ class DocumentService:
         file_path: Path,
         file_ext: str,
         document_name: str,
+        delete_file_on_failure: bool = True,
     ) -> None:
         """Process one document: queued -> processing -> ready/error.
 
@@ -226,6 +227,11 @@ class DocumentService:
         re-run the pipeline and clean up twice. Embedding calls
         already retry internally (tenacity); this is one extra
         service-level retry for a transient provider outage.
+
+        ``delete_file_on_failure`` is False only for startup recovery
+        of a previously-ready document: a transient provider failure
+        there must not destroy the user's stored file (the row is
+        reset to ``queued`` instead so a later retry can pick it up).
         """
         max_attempts = max(1, settings.INGESTION_MAX_ATTEMPTS)
         last_exc: Exception | None = None
@@ -312,7 +318,8 @@ class DocumentService:
                             doc_id,
                             cleanup_exc,
                         )
-                _cleanup_file(file_path)
+                if delete_file_on_failure:
+                    _cleanup_file(file_path)
                 safe_message, status_code = _safe_ingestion_message(exc)
                 await self._doc_repo.mark_error(doc_id, safe_message, owner_id=owner_id)
                 await self._db.commit()
@@ -358,6 +365,80 @@ class DocumentService:
             except HTTPException:
                 errored += 1
         return {"processed": processed, "errored": errored, "total": len(queued)}
+
+    async def requeue_ready_documents_missing_vectors(
+        self,
+        vector_store: VectorStoreService | None = None,
+        reprocess_inline: bool = False,
+    ) -> dict[str, int]:
+        """Startup recovery: re-queue 'ready' rows that lost vectors.
+
+        A backend restart wipes the volatile ``:memory:`` vector store
+        while the DB still says ``ready``, so chat refuses every
+        question about those documents -- and the content-hash dedupe
+        then returns the same stale row on re-upload, leaving the user
+        no self-service recovery. Rows whose vectors are gone are
+        reset to ``queued`` so they are re-indexed from the stored
+        file (the existing recovery path).
+
+        With ``reprocess_inline=True`` (what the backend lifespan
+        uses) the re-indexing happens here, in this process, instead
+        of being left to the worker: the worker is a separate process
+        with its own ``:memory:`` store, so vectors it upserts are
+        invisible to the backend's search. A failed inline attempt
+        leaves the row ``queued`` -- and the stored file intact -- so
+        the worker or a later retry can pick it up. Rows whose stored
+        file is also gone cannot be re-indexed; they are left
+        untouched and counted, not silently deleted.
+        """
+        store = vector_store if vector_store is not None else self._vector_svc
+        ready = await self._doc_repo.get_ready()
+        requeued = 0
+        recovered = 0
+        failed = 0
+        skipped_missing_file = 0
+        for doc in ready:
+            file_path = Path(settings.UPLOAD_DIR) / str(doc.owner_id) / doc.filename
+            if not file_path.exists():
+                skipped_missing_file += 1
+                continue
+            if await store.count_for_document(doc.id, doc.owner_id) == 0:
+                await self._doc_repo.set_status(
+                    doc.id, "queued", progress=0, owner_id=doc.owner_id
+                )
+                await self._db.commit()
+                requeued += 1
+                logger.info(
+                    "Re-queued document %s: ready in DB but no vectors in store",
+                    doc.id,
+                )
+                if reprocess_inline:
+                    try:
+                        await self._process_document(
+                            doc_id=doc.id,
+                            owner_id=doc.owner_id,
+                            file_path=file_path,
+                            file_ext=doc.file_type,
+                            document_name=doc.original_name,
+                            delete_file_on_failure=False,
+                        )
+                        recovered += 1
+                    except HTTPException:
+                        # _process_document marked the row error; put
+                        # it back to queued (file preserved) so the
+                        # worker or a later retry can pick it up.
+                        await self._doc_repo.set_status(
+                            doc.id, "queued", progress=0, owner_id=doc.owner_id
+                        )
+                        await self._db.commit()
+                        failed += 1
+        return {
+            "checked": len(ready),
+            "requeued": requeued,
+            "recovered": recovered,
+            "failed": failed,
+            "skipped_missing_file": skipped_missing_file,
+        }
 
     async def delete(self, doc_id: uuid.UUID, owner_id: uuid.UUID) -> None:
         doc = await self._doc_repo.get_by_id_for_owner(doc_id, owner_id)
