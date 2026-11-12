@@ -60,7 +60,13 @@ async def test_requeue_ready_doc_missing_vectors(
     vector_store = VectorStoreService()
     vector_store.count_for_document = AsyncMock(return_value=0)  # type: ignore[method-assign]
     result = await svc.requeue_ready_documents_missing_vectors(vector_store)
-    assert result == {"checked": 1, "requeued": 1, "skipped_missing_file": 0}
+    assert result == {
+        "checked": 1,
+        "requeued": 1,
+        "recovered": 0,
+        "failed": 0,
+        "skipped_missing_file": 0,
+    }
     finished = await DocumentRepository(db_session).get_by_id_for_owner(doc_id, owner)
     assert finished is not None
     assert finished.status == "queued"
@@ -78,7 +84,13 @@ async def test_requeue_keeps_ready_doc_with_vectors(
     vector_store = VectorStoreService()
     vector_store.count_for_document = AsyncMock(return_value=3)  # type: ignore[method-assign]
     result = await svc.requeue_ready_documents_missing_vectors(vector_store)
-    assert result == {"checked": 1, "requeued": 0, "skipped_missing_file": 0}
+    assert result == {
+        "checked": 1,
+        "requeued": 0,
+        "recovered": 0,
+        "failed": 0,
+        "skipped_missing_file": 0,
+    }
     finished = await DocumentRepository(db_session).get_by_id_for_owner(doc_id, owner)
     assert finished is not None
     assert finished.status == "ready"
@@ -95,7 +107,13 @@ async def test_requeue_skips_ready_doc_with_missing_file(
     vector_store = VectorStoreService()
     vector_store.count_for_document = AsyncMock(return_value=0)  # type: ignore[method-assign]
     result = await svc.requeue_ready_documents_missing_vectors(vector_store)
-    assert result == {"checked": 1, "requeued": 0, "skipped_missing_file": 1}
+    assert result == {
+        "checked": 1,
+        "requeued": 0,
+        "recovered": 0,
+        "failed": 0,
+        "skipped_missing_file": 1,
+    }
     assert vector_store.count_for_document.call_count == 0  # type: ignore[attr-defined]
     finished = await DocumentRepository(db_session).get_by_id_for_owner(doc_id, owner)
     assert finished is not None
@@ -125,6 +143,94 @@ async def test_count_for_document_against_real_memory_store() -> None:
     assert await svc.count_for_document(uuid.uuid4(), owner) == 0
     await svc.delete_by_document(doc_id, owner)
     assert await svc.count_for_document(doc_id, owner) == 0
+
+
+@pytest.mark.asyncio
+async def test_reprocess_inline_recovers_doc_in_place(
+    db_session: AsyncSession, tmp_path, monkeypatch
+) -> None:
+    """Inline recovery (what the lifespan does): ready again, no worker.
+
+    Without this, the re-queued row is picked up by the worker, whose
+    own :memory: store is invisible to the backend -- the document
+    would stay unsearchable despite saying 'ready'.
+    """
+    owner, doc_id = await _make_ready_doc(
+        db_session, tmp_path, monkeypatch, with_file=True
+    )
+    svc = DocumentService(db_session)
+    vector_store = VectorStoreService()
+    vector_store.count_for_document = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    with (
+        patch(
+            "app.services.embedding_service.EmbeddingService.embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[0.1] * 3072],
+        ),
+        patch(
+            "app.services.vector_store_service.VectorStoreService.upsert_chunks",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.vector_store_service.VectorStoreService.ensure_collection",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await svc.requeue_ready_documents_missing_vectors(
+            vector_store, reprocess_inline=True
+        )
+    assert result == {
+        "checked": 1,
+        "requeued": 1,
+        "recovered": 1,
+        "failed": 0,
+        "skipped_missing_file": 0,
+    }
+    finished = await DocumentRepository(db_session).get_by_id_for_owner(doc_id, owner)
+    assert finished is not None
+    assert finished.status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_reprocess_inline_failure_keeps_row_queued_and_file(
+    db_session: AsyncSession, tmp_path, monkeypatch
+) -> None:
+    """A transient provider failure during inline recovery must not
+    destroy the previously-ready document's stored file: the row goes
+    back to 'queued' for a later retry instead of 'error'."""
+    from app.services.embedding_service import EmbeddingError
+
+    owner, doc_id = await _make_ready_doc(
+        db_session, tmp_path, monkeypatch, with_file=True
+    )
+    svc = DocumentService(db_session)
+    vector_store = VectorStoreService()
+    vector_store.count_for_document = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    with (
+        patch(
+            "app.services.embedding_service.EmbeddingService.embed_batch",
+            new_callable=AsyncMock,
+            side_effect=EmbeddingError("provider down"),
+        ),
+        patch(
+            "app.services.vector_store_service.VectorStoreService.ensure_collection",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await svc.requeue_ready_documents_missing_vectors(
+            vector_store, reprocess_inline=True
+        )
+    assert result == {
+        "checked": 1,
+        "requeued": 1,
+        "recovered": 0,
+        "failed": 1,
+        "skipped_missing_file": 0,
+    }
+    finished = await DocumentRepository(db_session).get_by_id_for_owner(doc_id, owner)
+    assert finished is not None
+    assert finished.status == "queued"
+    assert (tmp_path / str(owner) / "ready.txt").exists()
 
 
 @pytest.mark.asyncio
