@@ -40,12 +40,15 @@ pytestmark = pytest.mark.asyncio
 async def test_stream_persists_answer_on_file_db(tmp_path, monkeypatch):
     db_file = tmp_path / "stream.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    original_base = db_module.Base
+    # Take the metadata from a mapped model: reloading database.py
+    # creates a fresh Base, and a previous reload in this process may
+    # already have replaced db_module.Base with an empty one.
+    tables = User.__table__.metadata
     config_module.get_settings.cache_clear()
     importlib.reload(db_module)
     try:
         async with db_module.engine.begin() as conn:
-            await conn.run_sync(original_base.metadata.create_all)
+            await conn.run_sync(tables.create_all)
 
         user = User(
             id=uuid.uuid4(),

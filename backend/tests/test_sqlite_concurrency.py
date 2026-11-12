@@ -37,14 +37,16 @@ async def test_write_waits_out_lock_longer_than_old_default(tmp_path, monkeypatc
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     # Reloading database.py rebuilds the engine from the tmp file —
     # but it also creates a fresh Base, while the mapped models stay
-    # registered on the original one. Keep the original Base for
-    # create_all; the reloaded engine/session is what is under test.
-    original_base = db_module.Base
+    # registered on the original one (and a previous reload in this
+    # process may already have replaced db_module.Base with an empty
+    # one). Take the metadata from a mapped model instead, so
+    # create_all always sees every table.
+    tables = User.__table__.metadata
     config_module.get_settings.cache_clear()
     importlib.reload(db_module)
     try:
         async with db_module.engine.begin() as conn:
-            await conn.run_sync(original_base.metadata.create_all)
+            await conn.run_sync(tables.create_all)
 
         # WAL is actually on for this file.
         raw = sqlite3.connect(db_file)
