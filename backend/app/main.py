@@ -64,18 +64,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup recovery: a restart wipes the volatile :memory: vector
     # store while the DB still says 'ready', leaving documents that
     # refuse every question and cannot be fixed by re-upload (dedupe
-    # returns the stale row). Re-queue those rows so the ingestion
-    # worker re-indexes them from the stored file. Recovery must never
+    # returns the stale row). Re-index those rows in this process --
+    # the worker has its own :memory: store, so leaving it to the
+    # worker would not make them searchable here. Recovery must never
     # break boot: with a persistent store this is a cheap no-op, and
     # any failure here only logs a warning.
     try:
         async with AsyncSessionLocal() as session:
             reconciled = await DocumentService(
                 session
-            ).requeue_ready_documents_missing_vectors(vs)
+            ).requeue_ready_documents_missing_vectors(vs, reprocess_inline=True)
         if reconciled["requeued"]:
             logger.info(
-                "Re-queued %s document(s) missing vectors: %s",
+                "Recovered %s/%s document(s) missing vectors: %s",
+                reconciled["recovered"],
                 reconciled["requeued"],
                 reconciled,
             )
