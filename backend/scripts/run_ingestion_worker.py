@@ -31,6 +31,7 @@ from app.services.document_service import DocumentService
 import app.models.conversation  # noqa: F401
 import app.models.document  # noqa: F401
 import app.models.refresh_token  # noqa: F401
+import app.models.revoked_access_token  # noqa: F401
 import app.models.user  # noqa: F401
 
 logging.basicConfig(

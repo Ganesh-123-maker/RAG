@@ -80,6 +80,42 @@ services:
     # No command here: the backend image CMD (entrypoint.sh) runs
     # `alembic upgrade head` then uvicorn, so `docker run` works too.
 
+  # ── Ingestion Worker ────────────────────────────────────────────────────────
+  # There was no worker service before Phase 2: queued documents had
+  # no recovery path in compose (the backend ingests synchronously on
+  # upload, but a crash mid-ingestion leaves a queued row that only
+  # this worker picks up, and the startup reconcile leaves rows queued
+  # when inline re-indexing fails). Same image as the backend; the
+  # command override replaces entrypoint.sh, so no second migration
+  # run — the worker depends on the backend being healthy (migrations
+  # done) before it starts polling.
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag_worker
+    restart: unless-stopped
+    command: ["python", "scripts/run_ingestion_worker.py", "--loop", "--interval", "30"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      POSTGRES_HOST: postgres
+      QDRANT_HOST: qdrant
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpassword}@postgres:5432/${POSTGRES_DB:-ragdb}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      backend:
+        condition: service_healthy
+
   # ── Next.js Frontend ──────────────────────────────────────────────────────────
   frontend:
     build:

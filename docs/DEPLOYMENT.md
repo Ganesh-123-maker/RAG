@@ -6,8 +6,9 @@
 |---|---|---|
 | Frontend | Vercel | Native Next.js hosting; no config file needed for Next.js (there is deliberately no `vercel.json` in this repo -- inventing one would add nothing). |
 | Backend | Render, Docker web service (`render.yaml`) | Single declarative file, Docker entrypoint already runs `alembic upgrade head` then uvicorn, health check path `/health` exists. |
+| Worker | Render, Docker worker service (`rag-worker`, Phase 2) | Same image as the backend; polls the ingestion queue every 30s. Without it, a document queued by a crashed upload has no recovery path in production. |
 | Postgres | Render Postgres (free tier, `render.yaml`) | Managed, and the app already speaks asyncpg. |
-| Qdrant | Qdrant Cloud free tier | The app already supports Qdrant Cloud (API key + HTTPS on port 443); Render does not host Qdrant in this config. |
+| Qdrant | Qdrant Cloud free tier | The app already supports Qdrant Cloud (API key + HTTPS on port 443); Render does not host Qdrant in this config. **Must be persistent**: a volatile `:memory:` Qdrant loses all vectors on restart while the DB still says `ready`. The backend's startup reconcile re-indexes them (recovery), but production must not rely on it. |
 
 Alternatives considered and not chosen: Fly.io (also viable, but
 adds a second CLI/config surface for no benefit here) and Railway
@@ -37,15 +38,23 @@ verified from this repository and is removed from the README.
    - `QDRANT_HOST` -- Qdrant Cloud cluster host, e.g.
      `<cluster-id>.qdrant.io` (host only, no scheme, no port).
    - `QDRANT_API_KEY` -- Qdrant Cloud API key.
+   Set the same `OPENAI_API_KEY`, `JWT_SECRET_KEY`, `QDRANT_HOST`,
+   `QDRANT_PORT`, `QDRANT_API_KEY` (and the scheme-fixed
+   `DATABASE_URL`, see step 2) on the **`rag-worker`** service too:
+   the worker embeds and upserts with the same providers, and it
+   does not run migrations — the web service owns `alembic upgrade
+   head` at boot.
 2. **DATABASE_URL scheme fix (required, easy to miss).** Render's
    `fromDatabase` connection string uses the `postgres://` scheme,
    but this app (SQLAlchemy async + Alembic) requires
    `postgresql+asyncpg://`. After applying the blueprint, edit the
    web service's `DATABASE_URL` in the Render dashboard to the
-   Postgres internal URL with that scheme substituted. Until that
-   edit, the service will fail to start. This is a Render
-   configuration step, not a code bug, and it is called out here
-   and in `render.yaml` so it is not discovered by trial and error.
+   Postgres internal URL with that scheme substituted — and do the
+   same edit on the **worker service**, which gets the same raw
+   `fromDatabase` URL. Until that edit, the service will fail to
+   start. This is a Render configuration step, not a code bug, and
+   it is called out here and in `render.yaml` so it is not
+   discovered by trial and error.
 3. **Qdrant Cloud free-tier cluster** (create it first, then fill in
    `QDRANT_HOST`/`QDRANT_API_KEY` above). `QDRANT_PORT` is `443`
    in `render.yaml`; the old README's `6333` was wrong for cloud.
@@ -70,9 +79,10 @@ verified from this repository and is removed from the README.
 
 ```bash
 # 1. Backend (Render): apply render.yaml, set the secrets above,
-#    fix the DATABASE_URL scheme, deploy. The Dockerfile CMD runs
-#    `alembic upgrade head` then uvicorn, so no separate migration
-#    step is needed.
+#    fix the DATABASE_URL scheme on BOTH services, deploy. The
+#    Dockerfile CMD runs `alembic upgrade head` then uvicorn, so no
+#    separate migration step is needed. The worker service starts
+#    polling the ingestion queue once the web service is healthy.
 # 2. Frontend (Vercel): import repo, Root Directory = frontend,
 #    BACKEND_URL = <Render backend URL>, deploy.
 # 3. Smoke test (see below) against the live URLs.
@@ -92,15 +102,36 @@ streams. Record the real URLs and the smoke results in this document
 and in the release notes -- do not backfill a URL that was not
 smoke-tested. A chat smoke needs a valid `OPENAI_API_KEY`; a
 placeholder key proves boot/readiness only, exactly as in the CI
-`compose-smoke` job.
+`compose-smoke` job. Also upload a **multi-chunk** document (more
+than ~512 tokens) and ask a question needing facts from both ends:
+a provider that omits the embedding `index` field (Gemini did this
+before Phase 2) breaks multi-chunk ingestion, and a single-chunk
+smoke would not catch it.
 
 ## Local / compose smoke (what CI does instead)
 
 CI's `compose-smoke` job runs `docker compose up -d --build` with a
 test key and checks `/health` + `/ready` + the frontend login page.
-That proves boot, migration, and readiness -- not chat. Docker was
-not available in the Phase G sandbox, so the compose smoke was not
-run there either; it is a CI verification, not a claimed local pass.
+That proves boot, migration, and readiness -- not chat. The compose
+stack now includes the `worker` service (`rag_worker`); the smoke
+checks the backend's `/ready`, which requires the `alembic_version`
+table (Phase 2), so a stack started before migrations will report
+not-ready instead of silently serving requests against an
+un-migrated schema. Docker was not available in the Phase G sandbox,
+so the compose smoke was not run there either; it is a CI
+verification, not a claimed local pass.
+
+## Observability notes (Phase 2)
+
+- Logs are structured with a `request_id` on every request
+  (`app.requests`); grep the backend log for a request id to trace
+  one call end to end. No secrets or tokens are logged (verified by
+  grep over the Phase 2 live logs).
+- `/metrics` is unauthenticated and returns aggregate counts /
+  latencies only (paths collapsed, no user data). Restrict it at
+  the reverse proxy if it must not be public.
+- `/ready` checks the DB schema (`alembic_version` present) and
+  Qdrant, not just connectivity; `/health` is liveness only.
 
 ## Rollback
 

@@ -9,11 +9,20 @@
   JavaScript never sees the token (Phase E removed all `js-cookie`
   token handling from app code; the `js-cookie` package itself was
   already gone from `package.json` by Phase F).
-- Logout revokes the current access token, via an in-memory denylist
-  (`core/token_denylist.py`), and revokes the presented refresh
-  token in the database. Access-token denylist revocation does not
-  survive a process restart or span replicas; refresh-token
-  revocation does (it is a DB row, not process memory).
+- Logout revokes the current access token, via a **DB-backed
+  denylist** (`core/token_denylist.py`, table
+  `revoked_access_tokens`, migration `005_revoked_access_tokens`,
+  Phase 2), and revokes the presented refresh token in the
+  database. The revocation row survives a process restart (proven
+  live 2026-11-12: a logged-out token stayed 401 across a restart;
+  before the fix it went 401 → 200). The in-memory set is still the
+  hot path for the per-request check (no DB round-trip per request)
+  and is reloaded from unexpired rows at boot; expired rows are
+  pruned at load. The denylist still does not span replicas — each
+  instance loads the same table at boot, but a revocation written
+  after boot is only visible to other instances after they restart
+  (or reload); Redis-backed sharing remains the multi-instance
+  upgrade, listed under Future work below.
 - Refresh tokens: opaque tokens (`secrets.token_urlsafe(32)`)
   stored only as SHA-256 hashes (`models/refresh_token.py`,
   migration `004_refresh_tokens`), 7-day expiry
@@ -187,8 +196,14 @@ not be quoted as current. Frontend vitest (21 passed), `tsc`, and
 
 ## What is still open (security follow-ups)
 
-- Redis-backed rate limits / denylist / quotas for multi-instance
-  deployments (current ones are single-instance).
+- Redis-backed rate limits / quotas for multi-instance deployments
+  (current ones are single-instance). The access-token denylist is
+  DB-backed since Phase 2, but cross-instance visibility of a fresh
+  revocation still needs a restart/reload per instance; Redis
+  sharing remains the upgrade for that.
+- `/metrics` is unauthenticated (aggregate counts/latencies only,
+  no user data — verified in the Phase 2 live logs). Restrict it at
+  the reverse proxy in production if it must not be public.
 - Re-check the 3 remaining pip-audit records (python-jose, ecdsa)
   before any public deploy — see the pip-audit section above.
 - A public-deploy security review pass after that upgrade.

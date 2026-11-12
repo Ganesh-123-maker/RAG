@@ -258,6 +258,15 @@ async def chat_stream(
     existing = await conv_repo.get_messages_for_owner(conv_id, current_user.id)
     history = [{"role": m.role, "content": m.content} for m in existing]
     await conv_repo.add_message(conv_id, "user", payload.question)
+    # Commit the user message BEFORE the agent runs. The generator
+    # below persists the assistant answer through a separate session
+    # in its finally block; without this commit the request session
+    # holds the user-message write uncommitted for the whole stream
+    # (get_db only commits after the response ends), so the persist
+    # session blocks on SQLite's single-writer lock and fails with
+    # "database is locked" — the answer was generated and streamed
+    # correctly, then lost (proven by a live browser run, 2026-11-12).
+    await db.commit()
 
     agent = AgentService()
 
