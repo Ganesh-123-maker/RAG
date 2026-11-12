@@ -375,6 +375,32 @@ class VectorStoreService:
             selected = mmr_select(retrieved, top_k, lambda_mult=settings.MMR_LAMBDA)
         return self._reranker.rerank(query_text, selected)
 
+    async def count_for_document(
+        self, document_id: uuid.UUID, owner_id: uuid.UUID
+    ) -> int:
+        """How many points exist for one document of one owner.
+
+        Used by the startup reconciliation in DocumentService: a
+        'ready' document with zero points has lost its vectors (e.g.
+        a restart wiped the volatile :memory: store) and must be
+        re-queued for ingestion instead of reported as searchable.
+        """
+        result = await self._client.count(
+            collection_name=self._collection,
+            count_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="document_id", match=MatchValue(value=str(document_id))
+                    ),
+                    FieldCondition(
+                        key="owner_id", match=MatchValue(value=str(owner_id))
+                    ),
+                ]
+            ),
+            exact=True,
+        )
+        return result.count
+
     async def delete_by_document(
         self, document_id: uuid.UUID, owner_id: uuid.UUID
     ) -> None:
