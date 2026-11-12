@@ -67,6 +67,15 @@ class DocumentRepository:
         )
         return result.scalars().all()
 
+    async def get_ready(self) -> Sequence[Document]:
+        """Documents in 'ready' (see requeue_ready_documents_missing_vectors)."""
+        result = await self._db.execute(
+            select(Document)
+            .where(Document.status == "ready")
+            .order_by(Document.created_at.asc())
+        )
+        return result.scalars().all()
+
     async def get_by_content_hash_for_owner(
         self, owner_id: uuid.UUID, content_hash: str
     ) -> Document | None:

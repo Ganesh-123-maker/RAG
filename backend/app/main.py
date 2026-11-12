@@ -12,9 +12,10 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
 
 from app.core.config import configure_logging, get_settings
-from app.core.database import engine
+from app.core.database import AsyncSessionLocal, engine
 from app.core.observability import RequestIDMetricsMiddleware, metrics
 from app.routers import auth, chat, documents
+from app.services.document_service import DocumentService
 from app.services.embedding_service import get_openai_client
 from app.services.vector_store_service import (
     VectorStoreService,
@@ -59,6 +60,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     vs = VectorStoreService()
     await vs.ensure_collection()
     logger.info("Vector store collection ready: %s", settings.QDRANT_COLLECTION)
+
+    # Startup recovery: a restart wipes the volatile :memory: vector
+    # store while the DB still says 'ready', leaving documents that
+    # refuse every question and cannot be fixed by re-upload (dedupe
+    # returns the stale row). Re-index those rows in this process --
+    # the worker has its own :memory: store, so leaving it to the
+    # worker would not make them searchable here. Recovery must never
+    # break boot: with a persistent store this is a cheap no-op, and
+    # any failure here only logs a warning.
+    try:
+        async with AsyncSessionLocal() as session:
+            reconciled = await DocumentService(
+                session
+            ).requeue_ready_documents_missing_vectors(vs, reprocess_inline=True)
+        if reconciled["requeued"]:
+            logger.info(
+                "Recovered %s/%s document(s) missing vectors: %s",
+                reconciled["recovered"],
+                reconciled["requeued"],
+                reconciled,
+            )
+    except Exception as exc:  # noqa: BLE001 -- recovery must never break boot
+        logger.warning("Vector reconciliation skipped: %s", exc)
 
     yield
 
