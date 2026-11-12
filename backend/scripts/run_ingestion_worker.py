@@ -24,6 +24,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.core.database import AsyncSessionLocal
 from app.services.document_service import DocumentService
 
+# Import every model module so relationships resolve: importing only
+# DocumentService leaves Document.owner ('User') unresolvable and
+# the worker crashes on first use (same class of bug as the eval
+# runner's refresh_token import, fixed 2026-10-27).
+import app.models.conversation  # noqa: F401
+import app.models.document  # noqa: F401
+import app.models.refresh_token  # noqa: F401
+import app.models.user  # noqa: F401
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
 )

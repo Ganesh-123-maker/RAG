@@ -6,9 +6,10 @@ output, it is not quoted.
 
 ## Corpus and golden set (Phase D)
 
-- **Corpus:** 10 self-written documents in `backend/eval/corpus/`
+- **Corpus:** 20 self-written documents in `backend/eval/corpus/`
   (listed in `corpus/corpus.json`; `langgraph_source.txt` and
-  `jwt-auth_source.txt` are generator inputs, not corpus documents).
+  `jwt-auth_source.txt` are generator inputs, not corpus documents;
+  grown from 10 on 2026-11-10 with 10 new docs and 20 new goldens).
   Formats: `.txt`, `.md`, `.pdf` (dependency-free writer in
   `generate_corpus.py`, verified readable by pdfplumber), `.docx`
   (python-docx). All text is self-written; product names and public
@@ -105,6 +106,7 @@ and a Gemini daily quota exhaustion, via per-question checkpointing
 | `gemini-live-limit20-threshold050` (20 golden, threshold 0.50) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.50 (8/16) | 1.0 (6/6) | 16/16 evaluated (4 judge calls 503'd: qdr-01/02/05/06) | 13.08s / 181.86s |
 | `gemini-live-full-planner-fix` (55 golden, grade + planner guard) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9955 | 0.9375 (15/16; 14/16 exact refusal text) | 1.0 (6/6) | 53/55 (wrong: doc-04, doc-05, both golden refusals) | 2.47s / 6.93s |
 | `gemini-live-full-numeric-grade` (55 golden, + specific-number grade bar) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9955 | 0.9375 (15/16, all exact refusal text) | 1.0 (6/6) | 55/55 | 2.34s / 3.66s |
+| `gemini-live-full-expanded-1` (75 golden, 20 docs, hedged-refusal rule) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.9956 | 1.0 (16/16, all exact refusal text) | 1.0 (6/6) | 72/73 evaluated (wrong: ft-01, keyword-stringency, see below; unevaluated: vec-04, pyt-02, judge 503s) | 3.64s / 32.14s |
 
 Raw outputs: `docs/eval/gemini-live-limit20/`,
 `docs/eval/gemini-live-full/`,
@@ -256,6 +258,41 @@ What these runs teach, and what they do not:
     reasoning/verify, in the favorable direction.
   - Shipped refusal figure is now 15/16 exact text. Do not quote
     16/16: un-15 is a measured miss.
+- **Hedged-answer rule + corpus expansion + live re-run, 2026-11-10**
+  (`docs/eval/gemini-live-full-expanded-1/`, Gemini free tier, 75
+  golden + 16 + 6 = 97 questions, ~60 min including a runtime
+  restart and a `--resume` from question 5, exit 0): **refusal
+  16/16 (1.0), all exact refusal text** -- the first perfect
+  refusal, and un-15 is the fix working. Hit@1/3/5 still 1.0 on
+  the doubled corpus, citation 1.0, faithfulness 0.9956, judge
+  72/73 evaluated, injection 6/6, latency p50 3.64s / p95 32.14s
+  (p95 again inflated by free-tier 503 retries). Changes in this
+  run: the verify normalization for hedged answers
+  (`_admits_absence`, plus a reasoning prompt that asks for the
+  refusal directly); the corpus grown 10 -> 20 self-written docs
+  with 20 new goldens; the eval runner's hardcoded extension map
+  replaced by deriving the extension from the filename (it
+  KeyErrored on the first new file); the ingestion worker's
+  missing model import fixed (it crashed on startup -- broken as
+  shipped); slate-500 -> slate-400 contrast fix.
+  - The 20 new goldens: 20/20 hit@1, 18/20 judge-correct. The
+    two exceptions are not retrieval failures.
+  - The single judge-False, ft-01 (LoRA: which weights frozen /
+    trained), is a golden defect, not a wrong answer: the answer
+    ("pretrained weights are frozen entirely, and small trainable
+    matrices are injected") is substantively correct, but it does
+    not contain the literal keywords 'low-rank' and 'rank r' that
+    the golden demanded -- those words are not needed to answer
+    the question as asked. The keyword list was over-strict and
+    has been corrected for future runs (see the golden.json
+    change in this branch); the run's 72/73 stands as measured
+    with the old list.
+  - Two goldens unevaluated (vec-04, pyt-02): judge calls 503'd
+    on the free tier. No golden refusals this run.
+  - Shipped refusal figure is now 16/16 exact text, on a 20-doc
+    corpus with 75 goldens. The goldens are still self-written
+    against the corpus, so this proves the pipeline at a larger
+    scale, not general quality on an unseen corpus.
 - Injection: inj-04 failed in both 0.30 runs and passed in the 0.50
   variant; with n=6 that single flip is not evidence the threshold
   caused it.

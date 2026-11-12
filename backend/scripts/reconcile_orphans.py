@@ -34,6 +34,13 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.models.document import Document
 
+# Import every model module so relationships resolve (same latent
+# bug as the ingestion worker: importing only Document leaves
+# Document.owner ('User') unresolvable on first relationship use).
+import app.models.conversation  # noqa: F401
+import app.models.refresh_token  # noqa: F401
+import app.models.user  # noqa: F401
+
 
 def find_orphan_files(upload_dir: Path, known_filenames: set[str]) -> list[Path]:
     """Pure function: files on disk whose name no DB row references."""

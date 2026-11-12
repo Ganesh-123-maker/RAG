@@ -1,0 +1,9 @@
+OAuth 2.0: Authorization Code Flow and PKCE
+
+OAuth 2.0 is a delegation protocol: it lets a user grant an application limited access to their data on another service without sharing their password. The application never sees the password; it receives tokens that carry limited scopes and expiry times.
+
+The authorization code flow is the standard flow for web and mobile apps. First, the application redirects the user to the authorization server with its client id, the scopes it wants, and a redirect URI. The user signs in and consents. The server redirects back to the application with a short-lived authorization code. The application then exchanges that code, together with its client secret, for tokens at the token endpoint. The code is useless on its own because the exchange requires the secret, and the code expires within minutes.
+
+Public clients such as mobile apps cannot keep a client secret, so they use PKCE, proof key for code exchange. The application generates a random code_verifier and sends its hash, the code_challenge, in the authorization request. At the token exchange it sends the original code_verifier, and the server checks the hash matches. An attacker who intercepts the authorization code still cannot exchange it, because they do not have the verifier.
+
+Two tokens come back. The access token is short-lived, usually minutes to an hour, and is sent with each API call. The refresh token is long-lived and is used only to request a new access token when the old one expires. Refresh tokens should be rotated on every use: each refresh returns a new refresh token and invalidates the old one, so a stolen refresh token is useful only until the legitimate client refreshes next, at which point reuse of the old token reveals the theft.

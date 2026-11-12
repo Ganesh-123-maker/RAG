@@ -1,0 +1,9 @@
+Transformer Attention: How It Works
+
+The Transformer, introduced in 2017, replaced recurrence with self-attention: every token in a sequence attends directly to every other token, so long-range dependencies cost one step instead of one step per token. The original model stacks 6 encoder layers and 6 decoder layers, with a model width d_model of 512.
+
+Scaled dot-product attention takes three inputs for every token: a query, a key, and a value. The query asks "what am I looking for", the key advertises "what I contain", and the value carries "what I will contribute if selected". Attention scores are the dot products of the query with all keys. Those scores are divided by the square root of the key dimension, sqrt(d_k), before the softmax. The scaling matters: without it, dot products grow large as dimensions grow, the softmax saturates into near-one-hot outputs, and gradients shrink to almost nothing. After softmax, the weights multiply the values and sum into one output vector per token.
+
+One attention head can only learn one kind of relationship, so the model uses multi-head attention: the queries, keys, and values are projected into several smaller subspaces, attention runs in each head in parallel, and the head outputs are concatenated and projected back to d_model. Different heads specialize -- one may track subject-verb agreement while another tracks coreference. The original Transformer used 8 heads.
+
+Because attention itself has no notion of order, positional encoding is added to the input embeddings: sine and cosine waves of different frequencies, so the model can tell token 3 from token 30 and can extrapolate to sequences longer than those seen in training. The feed-forward network after each attention block then processes each position independently with the same two linear layers.

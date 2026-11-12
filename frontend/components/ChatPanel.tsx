@@ -288,7 +288,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
               <BookOpen className="w-8 h-8 text-brand-400" />
             </div>
             <h2 className="text-xl font-semibold text-slate-200 mb-2">Ask your documents anything</h2>
-            <p className="text-slate-500 max-w-sm">
+            <p className="text-slate-400 max-w-sm">
               Start a conversation. The AI will retrieve relevant chunks from your documents and cite its sources.
             </p>
             <div className="mt-8 grid grid-cols-1 gap-3 w-full max-w-md">
@@ -346,7 +346,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
               placeholder="Ask a question about your documents… (Enter to send, Shift+Enter for new line)"
               rows={1}
               disabled={sending}
-              className="flex-1 bg-transparent text-slate-100 placeholder-slate-500 text-sm resize-none focus:outline-none leading-relaxed"
+              className="flex-1 bg-transparent text-slate-100 placeholder-slate-400 text-sm resize-none focus:outline-none leading-relaxed"
               style={{ maxHeight: "200px" }}
             />
             {sending ? (
@@ -369,7 +369,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
                   "flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all",
                   input.trim()
                     ? "bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/30"
-                    : "bg-surface-border text-slate-500 cursor-not-allowed"
+                    : "bg-surface-border text-slate-400 cursor-not-allowed"
                 )}
               >
                 <Send className="w-4 h-4" />
@@ -378,7 +378,7 @@ export default function ChatPanel({ conversationId, onConversationCreated }: Cha
           </div>
           <div className="flex items-center justify-center gap-2 mt-2">
             {sending && streamStatus && (
-              <p className="text-xs text-slate-500 text-center" role="status">
+              <p className="text-xs text-slate-400 text-center" role="status">
                 {streamStatus}…
               </p>
             )}
@@ -466,7 +466,7 @@ function MessageBubble({
                   onClick={() => setShowCitations(!showCitations)}
                   aria-expanded={showCitations}
                   aria-label={`${showCitations ? "Hide" : "Show"} ${message.citations.length} sources`}
-                  className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors mb-2"
+                  className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-300 transition-colors mb-2"
                 >
                   <BookOpen className="w-3.5 h-3.5" />
                   {message.citations.length} source{message.citations.length > 1 ? "s" : ""}
@@ -487,7 +487,7 @@ function MessageBubble({
                             {idx + 1}
                           </span>
                           <span className="font-medium text-brand-300 truncate">{citation.document_name}</span>
-                          <span className="ml-auto text-slate-500 text-xs flex-shrink-0">
+                          <span className="ml-auto text-slate-400 text-xs flex-shrink-0">
                             chunk {citation.chunk_index}
                             {citation.page != null ? ` · p. ${citation.page}` : ""}
                             {citation.section ? ` · ${citation.section}` : ""} · {(citation.score * 100).toFixed(0)}% match

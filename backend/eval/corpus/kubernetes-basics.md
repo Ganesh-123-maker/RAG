@@ -1,0 +1,9 @@
+# Kubernetes Basics: Pods, Deployments, and Services
+
+Kubernetes orchestrates containers across a cluster of machines. The smallest deployable unit is the pod: one or more containers that share a network namespace and storage, and that are always scheduled and killed together. A pod is ephemeral by design -- when its node fails, Kubernetes does not repair the pod, it replaces it, so nothing inside a pod should be treated as durable.
+
+A Deployment manages a set of identical pods. It declares a desired replica count, and the controller continuously creates or deletes pods to match it. Deployments also own rollouts: changing the container image triggers a rolling update, where new pods start and old pods stop one at a time, so the service never drops to zero. If the new version fails its readiness checks, the rollout stalls instead of taking down the working version, and kubectl rollout undo restores the previous one.
+
+A Service gives a stable address to a changing set of pods. Pods come and go with new IP addresses, so clients never talk to pods directly; they talk to a Service, which load-balances across the pods matching its label selector. A ClusterIP Service is reachable only inside the cluster. A NodePort Service opens a port on every node. A LoadBalancer Service asks the cloud provider for an external load balancer. The most common pattern is a ClusterIP Service in front of the application pods, with an Ingress handling external traffic.
+
+Namespaces divide one cluster into virtual clusters for isolation. A namespace scopes names, resource quotas, and access policies, so team-a and team-b can both run a Service called api without colliding. The default namespace is where resources land when no namespace is specified, and production workloads should never live there. The main command-line tool is kubectl: kubectl apply -f deployment.yaml creates or updates resources from a file, and kubectl get pods lists what is actually running.
