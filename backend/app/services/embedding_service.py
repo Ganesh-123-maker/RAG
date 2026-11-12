@@ -86,9 +86,23 @@ class EmbeddingService:
                         model=self._model,
                         dimensions=self._dimensions,
                     )
+                    # Sort by the provider's index, but do NOT trust it
+                    # to be present: Gemini's OpenAI-compatible endpoint
+                    # returns index=None for the first item (verified
+                    # live 2026-11-12), so a bare key=lambda x: x.index
+                    # raised TypeError and broke ingestion of every
+                    # multi-chunk document on that provider. Fall back
+                    # to the response position, which is input order.
                     return [
                         item.embedding
-                        for item in sorted(response.data, key=lambda x: x.index)
+                        for _, item in sorted(
+                            enumerate(response.data),
+                            key=lambda pair: (
+                                pair[1].index
+                                if pair[1].index is not None
+                                else pair[0]
+                            ),
+                        )
                     ]
         except Exception as exc:
             logger.error("OpenAI embedding API call failed after retries: %s", exc)
