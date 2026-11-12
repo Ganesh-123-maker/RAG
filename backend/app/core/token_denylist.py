@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.revoked_access_token import RevokedAccessToken
@@ -45,18 +45,31 @@ async def load_into_memory(db: AsyncSession) -> dict[str, int]:
     the lifespan, never breaks boot). Returns counts for logging.
     """
     now = datetime.now(UTC)
-    expired = await db.execute(
+    pruned = (
+        await db.execute(
+            select(func.count())
+            .select_from(RevokedAccessToken)
+            .where(RevokedAccessToken.expires_at <= now)
+        )
+    ).scalar_one()
+    await db.execute(
         delete(RevokedAccessToken).where(RevokedAccessToken.expires_at <= now)
     )
     rows = (
-        await db.execute(
-            select(RevokedAccessToken.jti).where(RevokedAccessToken.expires_at > now)
+        (
+            await db.execute(
+                select(RevokedAccessToken.jti).where(
+                    RevokedAccessToken.expires_at > now
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     await db.commit()
     with _lock:
         _revoked.update(rows)
-    return {"loaded": len(rows), "pruned_expired": expired.rowcount or 0}
+    return {"loaded": len(rows), "pruned_expired": pruned}
 
 
 async def revoke_persisted(db: AsyncSession, jti: str, expires_at: datetime) -> None:

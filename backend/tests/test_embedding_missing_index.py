@@ -8,6 +8,7 @@ document failed on Gemini (single-chunk docs never compared, which is
 why earlier live runs passed). The fix falls back to response
 position when index is None.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace

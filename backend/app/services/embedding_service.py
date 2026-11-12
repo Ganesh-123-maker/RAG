@@ -98,9 +98,7 @@ class EmbeddingService:
                         for _, item in sorted(
                             enumerate(response.data),
                             key=lambda pair: (
-                                pair[1].index
-                                if pair[1].index is not None
-                                else pair[0]
+                                pair[1].index if pair[1].index is not None else pair[0]
                             ),
                         )
                     ]

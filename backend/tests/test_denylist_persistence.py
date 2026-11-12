@@ -9,6 +9,7 @@ NOTE: the shared test_client fixture stubs get_current_user, which
 is exactly the dependency that enforces the denylist, so these tests
 build their own client that overrides only get_db.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -22,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.core.token_denylist as denylist
 from app.core.database import get_db
 from app.main import app
-from app.models.user import User
 
 pytestmark = pytest.mark.asyncio
 
